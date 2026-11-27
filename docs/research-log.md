@@ -108,3 +108,17 @@ User rejected taking over vanilla stamps ("不想要改原有模型").
 - The payload objective entity 0f19 and the deploy entity ba58 do spawn (4–5 and 2 per mission). The stamps' payload slots work.
 - The user says 2024 difficulty 9 had 1 Deploy + 3 Payload sites. The drill stratagem is "地殼鑽頭 / TECTONIC DRILL" (string 3177142887), used at the payload sites (crust fissures). Likely cause of the D7+ generation loop: only DF1/DF2/PACK can take payload objectives. The 4 record-only payload stamps (adab, d0a2, ba1d, 7460) are probably the real extra payload sites. Their "?" in 0.7.0 is a missing unit to find.
 - Purple ground is NOT from Meridia's deleted utility_primordial_day: nothing in the current game references its 8 missing materials or 12 missing textures. Key ffd46e6b… in the 2024 stamp settings is a utility stamp (S1 key), not ours. The purple sits at the ported stamps, so suspect the stamp levels' ground paint and the converted materials.
+
+2026-11-27 0.8.0–0.8.2:
+- data/game/*.dl_bin are encrypted. The engine reader decrypts them: [[game+0x3326308]+0x170], +8 read(name,&size), +0x20 free. 0.8.0 hooked KernelBase CreateFileW to swap in the 2024 file. The decrypted 2024 files are in F:\Game\A\HD2\A\0\hd2_old\20240601\dec\, the current ones in dec\current\.
+- The 2024 location_groups registered only DF1, DF2, PACK, TCS-A and TCS-B, all in the ICBM's group (62 entries). The record-only stamps were never placed in 2024.
+- Field map, 2024 file → current file, checked on 341 common stamps (memory = current file + 8):
+  - 0x54 → 0x58 level (0x1FE → 0x3FE)
+  - 0x8C → 0xE0 (0x07ff000f → 0x10f)
+  - 0xB0 → 0x108 category
+  - 0xC4 → 0x130
+  - 0xD4 → 0x140 spacing
+  - 0xE0 → 0x154 (top byte renumbered above 5)
+  - 0xE4 → 0x158 (0x70 → 0x430, 0x74 → 0x434, 0x7c → 0x43c)
+- 2024 values for DF1/DF2: category 4, C4 18, spacing 200 (TCS 24), E0 0x060000ff (PACK/TCS 0x050000ff), E4 0x74 (PACK 0x7c), second list (+0xA0 → mem +0x100) null except PACK.
+- 0.8.2 writes these values into the items.
