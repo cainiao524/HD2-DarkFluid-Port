@@ -1,0 +1,2 @@
+regex:^bin[\\/]helldivers2\.exe$
+regex:^bin[\\/]plugins[\\/]level_generation_pluginw64_release\.dll$

@@ -1,0 +1,10 @@
+{
+  "format": 1,
+  "id": "local.mission-groups",
+  "name": "Mission Groups",
+  "version": "2.0.0",
+  "description": "主機決定各星球建立哪一個原版任務組（行動）。整列換成原版任務組（含 ID），任務與目標表不動：客機免裝 mod，任務組 ID、種子與變種都由遊戲自己同步；8 人大廳可用。設定檔 mission-groups.txt。適用構建 25480438。",
+  "gameplay": true,
+  "coop": "per-player",
+  "code": { "dll": "mission_groups.dll", "sdk": 16 }
+}

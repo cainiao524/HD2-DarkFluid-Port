@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "id": "local.darkfluid-port",
+  "name": "Dark Fluid & TCS Port",
+  "version": "0.8.2",
+  "description": "移植 2024 年的「部署暗流體」任務，不改動任何原版模型、地形或地圖類型。0.5.1：在產生地圖時，以 TCS+ 站印模的登記項目為範本，把 3 個暗流體印模（背包點、兩種投放點）加進同一個登記組（原有項目不動），並補上它們的目標類型；載入印模用到的 27 個現行資源檔。就緒後把任務組 6（ACTIVATE TCS+）的特殊任務換成部署暗流體，並改用 2024 年原本的任務組名稱。需搭配 zz.darkfluid-resources 資源包；用 host-ops-test 把蟲族星球的任務組設成 6。適用構建 25480438。",
+  "gameplay": true,
+  "code": {
+    "dll": "darkfluid_port.dll",
+    "sdk": 16
+  }
+}

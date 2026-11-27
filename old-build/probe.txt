@@ -1,0 +1,2 @@
+regex:^data[\\/]9ba626afa44a3aa3(\..*)?$
+regex:^data[\\/]game[\\/]

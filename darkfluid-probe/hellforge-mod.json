@@ -1,0 +1,9 @@
+{
+  "format": 1,
+  "id": "local.darkfluid-probe",
+  "name": "Dark Fluid Probe",
+  "version": "0.1.0",
+  "description": "只读探测：把任务表、目标定义表、行动表和地形印模（location group）表倒进本次会话的日志文件夹，供暗流体／TCS 任务组移植分析。不写入任何游戏内存。仅适用构建 25480438。",
+  "gameplay": false,
+  "code": { "dll": "darkfluid_probe.dll", "sdk": 16 }
+}

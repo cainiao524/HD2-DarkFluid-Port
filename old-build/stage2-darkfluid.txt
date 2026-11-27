@@ -1,0 +1,8 @@
+regex:^data[\\/]271dd102d25ce55c\.(gpu_resources|stream)$
+regex:^data[\\/]e3319b35c54297f8\.(gpu_resources|stream)$
+regex:^data[\\/]fb04c61383402693\.(gpu_resources|stream)$
+regex:^data[\\/]8ac0fe970e89087f\.(gpu_resources|stream)$
+regex:^data[\\/]efd618be21cceeb3\.(gpu_resources|stream)$
+regex:^data[\\/]009da023c64d178d\.(gpu_resources|stream)$
+regex:^data[\\/]3a8b3b44156a9532\.(gpu_resources|stream)$
+regex:^data[\\/]91f45a686207a351\.(gpu_resources|stream)$

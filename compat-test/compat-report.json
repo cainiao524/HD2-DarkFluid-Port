@@ -1,0 +1,344 @@
+{
+ "zz.compat-level": [
+  {
+   "type": "level",
+   "name": "ebaefa35380ebb74",
+   "old_sizes": [
+    17264,
+    0,
+    0
+   ],
+   "current_sizes": [
+    17264,
+    0,
+    0
+   ]
+  },
+  {
+   "type": "level",
+   "name": "8b7981f68bcc36f0",
+   "old_sizes": [
+    21952,
+    0,
+    0
+   ],
+   "current_sizes": [
+    21952,
+    0,
+    0
+   ]
+  },
+  {
+   "type": "level",
+   "name": "c92a8619638a2978",
+   "old_sizes": [
+    23952,
+    0,
+    0
+   ],
+   "current_sizes": [
+    23952,
+    0,
+    0
+   ]
+  },
+  {
+   "type": "level",
+   "name": "c18b1631d1731888",
+   "old_sizes": [
+    23792,
+    0,
+    0
+   ],
+   "current_sizes": [
+    23792,
+    0,
+    0
+   ]
+  },
+  {
+   "type": "level",
+   "name": "079b1c3f0f9858ed",
+   "old_sizes": [
+    24384,
+    0,
+    0
+   ],
+   "current_sizes": [
+    24384,
+    0,
+    0
+   ]
+  }
+ ],
+ "zz.compat-unit": [
+  {
+   "type": "unit",
+   "name": "b4c2510f1d6e3e9b",
+   "old_sizes": [
+    5288,
+    0,
+    35188
+   ],
+   "current_sizes": [
+    5312,
+    0,
+    35188
+   ]
+  },
+  {
+   "type": "unit",
+   "name": "33469bd5f38101a3",
+   "old_sizes": [
+    5288,
+    0,
+    29344
+   ],
+   "current_sizes": [
+    5312,
+    0,
+    29344
+   ]
+  },
+  {
+   "type": "unit",
+   "name": "6c27d2ec98342b7f",
+   "old_sizes": [
+    7752,
+    0,
+    219004
+   ],
+   "current_sizes": [
+    5600,
+    0,
+    86924
+   ]
+  },
+  {
+   "type": "unit",
+   "name": "77595b05d5fc4e97",
+   "old_sizes": [
+    7656,
+    0,
+    835604
+   ],
+   "current_sizes": [
+    7072,
+    0,
+    873156
+   ]
+  },
+  {
+   "type": "unit",
+   "name": "c2e2b2f9e5e5b56b",
+   "old_sizes": [
+    6264,
+    0,
+    126804
+   ],
+   "current_sizes": [
+    6016,
+    0,
+    98036
+   ]
+  },
+  {
+   "type": "unit",
+   "name": "bf743f56e8287e35",
+   "old_sizes": [
+    6664,
+    0,
+    125164
+   ],
+   "current_sizes": [
+    5600,
+    0,
+    89908
+   ]
+  }
+ ],
+ "zz.compat-material": [
+  {
+   "type": "material",
+   "name": "2f87c4f671ae9adb",
+   "old_sizes": [
+    288,
+    0,
+    0
+   ],
+   "current_sizes": [
+    288,
+    0,
+    0
+   ]
+  },
+  {
+   "type": "material",
+   "name": "4bd7a20092c7a7d9",
+   "old_sizes": [
+    832,
+    0,
+    0
+   ],
+   "current_sizes": [
+    832,
+    0,
+    0
+   ]
+  },
+  {
+   "type": "material",
+   "name": "4cea2713ae9619b0",
+   "old_sizes": [
+    720,
+    0,
+    0
+   ],
+   "current_sizes": [
+    720,
+    0,
+    0
+   ]
+  },
+  {
+   "type": "material",
+   "name": "4d0133f281dcccec",
+   "old_sizes": [
+    512,
+    0,
+    0
+   ],
+   "current_sizes": [
+    512,
+    0,
+    0
+   ]
+  },
+  {
+   "type": "material",
+   "name": "60497eb2552b9fd4",
+   "old_sizes": [
+    288,
+    0,
+    0
+   ],
+   "current_sizes": [
+    288,
+    0,
+    0
+   ]
+  },
+  {
+   "type": "material",
+   "name": "649c8acc3c388e70",
+   "old_sizes": [
+    288,
+    0,
+    0
+   ],
+   "current_sizes": [
+    288,
+    0,
+    0
+   ]
+  },
+  {
+   "type": "material",
+   "name": "711b4caf7b61b03e",
+   "old_sizes": [
+    288,
+    0,
+    0
+   ],
+   "current_sizes": [
+    288,
+    0,
+    0
+   ]
+  },
+  {
+   "type": "material",
+   "name": "bc5bb03378e5be75",
+   "old_sizes": [
+    816,
+    0,
+    0
+   ],
+   "current_sizes": [
+    816,
+    0,
+    0
+   ]
+  },
+  {
+   "type": "material",
+   "name": "d2292afe2483e88c",
+   "old_sizes": [
+    176,
+    0,
+    0
+   ],
+   "current_sizes": [
+    176,
+    0,
+    0
+   ]
+  },
+  {
+   "type": "material",
+   "name": "da54f196e7fcfbed",
+   "old_sizes": [
+    752,
+    0,
+    0
+   ],
+   "current_sizes": [
+    752,
+    0,
+    0
+   ]
+  },
+  {
+   "type": "material",
+   "name": "ed9685a4d9f520b2",
+   "old_sizes": [
+    288,
+    0,
+    0
+   ],
+   "current_sizes": [
+    288,
+    0,
+    0
+   ]
+  },
+  {
+   "type": "material",
+   "name": "fc8c1eb846baabe8",
+   "old_sizes": [
+    288,
+    0,
+    0
+   ],
+   "current_sizes": [
+    288,
+    0,
+    0
+   ]
+  },
+  {
+   "type": "material",
+   "name": "ff5b828092594613",
+   "old_sizes": [
+    1296,
+    0,
+    0
+   ],
+   "current_sizes": [
+    1296,
+    0,
+    0
+   ]
+  }
+ ]
+}

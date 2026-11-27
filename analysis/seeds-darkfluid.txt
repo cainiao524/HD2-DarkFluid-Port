@@ -1,0 +1,19 @@
+# 暗流體 / TCS 任務組的起點。名字來自 FileDiver、HD2SDK 的雜湊表與現行資料索引。
+packages/content/bug_tcs_01
+packages/content/bug_tcs_02
+packages/content/bug_tcs_03_backpack
+packages/content/bug_tcs_03_thumper
+packages/content/bug_tcs_04
+packages/generated/loadout/tcs_03_thumper
+packages/content/black_hole
+packages/content/black_hole_intense
+content/objectives/obj_bugs/tcs/bug_darkfluid_backpack
+content/objectives/obj_bugs/thumper/thumper
+content/objectives/obj_bugs/super_syringe/super_syringe
+content/objectives/obj_bugs/tcs/bug_tcs_main_tower_01
+content/objectives/obj_bugs/tcs/bug_tcs_support_pillar_01
+content/fac_helldivers/hellpod/weapon_rack/weapon_rack_darkfluid_backpack
+# 名字只知道後半段，以雜湊直接給：
+0e4e0a4947d5bfbe   # ...ion_dark_fluid_backpack
+5d422ca6694a5129   # ...ssion_dark_fluid_tcs_01
+e14e9f44edda7bce   # ...ssion_dark_fluid_tcs_02

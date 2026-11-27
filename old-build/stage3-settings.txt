@@ -1,0 +1,4 @@
+regex:^data[\\/]game[\\/][^\\/]+\.dl_bin$
+regex:^data[\\/]game[\\/]dl_library\.dl_typelib$
+regex:^data[\\/]game[\\/]game\.dll$
+regex:^data[\\/]bundle_database\.data$

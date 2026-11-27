@@ -1,0 +1,424 @@
+{
+ "source": "shalzuth/HelldiversData commit 5a2e4b30a2 (manifest 5604538564913335971), data/settings/generated_stamp_settings.json",
+ "note": "stamp key = the stamp's level resource hash",
+ "stamps": [
+  {
+   "mission": "deploy_dark_fluid",
+   "archive": "fb04c61383402693",
+   "level": "0b34988e28a9131b",
+   "entry_index": 795,
+   "key": 807437969541108507,
+   "stamp": {
+    "collision_circles": [
+     {
+      "position": {
+       "x": -0.545043945,
+       "y": -28.1114235
+      },
+      "radius": 124.159897,
+      "flattening_intensity": 1,
+      "flatten_terrain": 1
+     },
+     {
+      "position": {
+       "x": 82.8730164,
+       "y": 82.0637512
+      },
+      "radius": 70.7429352,
+      "flattening_intensity": 1,
+      "flatten_terrain": 1
+     },
+     {
+      "position": {
+       "x": -77.3783569,
+       "y": 80.9033203
+      },
+      "radius": 66.5170441,
+      "flattening_intensity": 1,
+      "flatten_terrain": 1
+     },
+     {
+      "position": {
+       "x": -14.9903526,
+       "y": 71.4284668
+      },
+      "radius": 70.7429352,
+      "flattening_intensity": 1,
+      "flatten_terrain": 1
+     }
+    ],
+    "collision_rectangles": [],
+    "entrypoints": [],
+    "splines": [],
+    "extensions": [],
+    "proxies": [],
+    "rotation_type": "StampRotationType_random"
+   }
+  },
+  {
+   "mission": "deactivate_tcs",
+   "archive": "271dd102d25ce55c",
+   "level": "465af3d39ab42964",
+   "entry_index": 2404,
+   "key": 5069632420718061924,
+   "stamp": {
+    "collision_circles": [
+     {
+      "position": {
+       "x": -113.933228,
+       "y": 1.68789673
+      },
+      "radius": 62.2630234,
+      "flattening_intensity": 1,
+      "flatten_terrain": 1
+     },
+     {
+      "position": {
+       "x": 27.5261669,
+       "y": -113.500435
+      },
+      "radius": 52.4549103,
+      "flattening_intensity": 1,
+      "flatten_terrain": 1
+     },
+     {
+      "position": {
+       "x": 9.72735596,
+       "y": 7.66194296
+      },
+      "radius": 74.4025574,
+      "flattening_intensity": 1,
+      "flatten_terrain": 1
+     },
+     {
+      "position": {
+       "x": 0.699996948,
+       "y": 105.099991
+      },
+      "radius": 54.448101,
+      "flattening_intensity": 1,
+      "flatten_terrain": 1
+     },
+     {
+      "position": {
+       "x": -59.7383881,
+       "y": 98.7590561
+      },
+      "radius": 57.5169449,
+      "flattening_intensity": 1,
+      "flatten_terrain": 1
+     },
+     {
+      "position": {
+       "x": 26.8484535,
+       "y": -46.6481171
+      },
+      "radius": 49.8011971,
+      "flattening_intensity": 1,
+      "flatten_terrain": 1
+     },
+     {
+      "position": {
+       "x": -62.0313835,
+       "y": 32.3382034
+      },
+      "radius": 26.4728756,
+      "flattening_intensity": 1,
+      "flatten_terrain": 1
+     },
+     {
+      "position": {
+       "x": -56.4967766,
+       "y": -47.6235199
+      },
+      "radius": 37.4953308,
+      "flattening_intensity": 1,
+      "flatten_terrain": 1
+     },
+     {
+      "position": {
+       "x": -0.300168991,
+       "y": -105.828232
+      },
+      "radius": 68.6004868,
+      "flattening_intensity": 1,
+      "flatten_terrain": 1
+     },
+     {
+      "position": {
+       "x": 60.0999985,
+       "y": 93.0999985
+      },
+      "radius": 60.082077,
+      "flattening_intensity": 1,
+      "flatten_terrain": 1
+     }
+    ],
+    "collision_rectangles": [],
+    "entrypoints": [],
+    "splines": [],
+    "extensions": [],
+    "proxies": [],
+    "rotation_type": "StampRotationType_random"
+   }
+  },
+  {
+   "mission": "deactivate_tcs",
+   "archive": "e3319b35c54297f8",
+   "level": "004f0e2fc6bcdb32",
+   "entry_index": 2866,
+   "key": 22252121520659250,
+   "stamp": {
+    "collision_circles": [
+     {
+      "position": {
+       "x": -76.5,
+       "y": -141.300003
+      },
+      "radius": 42.2855225,
+      "flattening_intensity": 1,
+      "flatten_terrain": 1
+     },
+     {
+      "position": {
+       "x": 20.2000008,
+       "y": -49.7000008
+      },
+      "radius": 85.9335938,
+      "flattening_intensity": 1,
+      "flatten_terrain": 1
+     },
+     {
+      "position": {
+       "x": 78.8000031,
+       "y": 73.8000031
+      },
+      "radius": 73.4285736,
+      "flattening_intensity": 1,
+      "flatten_terrain": 1
+     },
+     {
+      "position": {
+       "x": -144.199997,
+       "y": -87.9000015
+      },
+      "radius": 76.5636749,
+      "flattening_intensity": 1,
+      "flatten_terrain": 1
+     },
+     {
+      "position": {
+       "x": 0.200000048,
+       "y": -150.199997
+      },
+      "radius": 39.4566574,
+      "flattening_intensity": 1,
+      "flatten_terrain": 1
+     },
+     {
+      "position": {
+       "x": -34.7999992,
+       "y": 69.4000015
+      },
+      "radius": 73.4285736,
+      "flattening_intensity": 1,
+      "flatten_terrain": 1
+     },
+     {
+      "position": {
+       "x": -58.7999992,
+       "y": -32
+      },
+      "radius": 104.084869,
+      "flattening_intensity": 1,
+      "flatten_terrain": 1
+     },
+     {
+      "position": {
+       "x": 24.3000011,
+       "y": 94.8000031
+      },
+      "radius": 49.9919662,
+      "flattening_intensity": 1,
+      "flatten_terrain": 1
+     }
+    ],
+    "collision_rectangles": [],
+    "entrypoints": [
+     {
+      "type": "StampEntryType_connection",
+      "direction": -0.0207726154,
+      "satellite_type": "StampEntrySatelliteType_General",
+      "spline_connection": {
+       "index": 0,
+       "segment": 0
+      }
+     },
+     {
+      "type": "StampEntryType_stop",
+      "direction": 3.12082005,
+      "satellite_type": "StampEntrySatelliteType_General",
+      "spline_connection": {
+       "index": 0,
+       "segment": 3
+      }
+     }
+    ],
+    "splines": [
+     {
+      "spline_type": "StampSpline_Path",
+      "segments": [
+       {
+        "x": -169.729065,
+        "y": -3.20000005
+       },
+       {
+        "x": -169.729065,
+        "y": -3.20000005
+       },
+       {
+        "x": -166.880325,
+        "y": -3.25918412
+       },
+       {
+        "x": -166.880325,
+        "y": -3.25918412
+       }
+      ],
+      "entrypoints": [
+       0,
+       1
+      ]
+     }
+    ],
+    "extensions": [],
+    "proxies": [],
+    "rotation_type": "StampRotationType_random"
+   }
+  },
+  {
+   "mission": "deploy_dark_fluid",
+   "archive": "efd618be21cceeb3",
+   "level": "2ddaa26e56f2cd4c",
+   "entry_index": 3404,
+   "key": 3304131871418535244,
+   "stamp": {
+    "collision_circles": [
+     {
+      "position": {
+       "x": 23.2822819,
+       "y": -112.476761
+      },
+      "radius": 28.0299034,
+      "flattening_intensity": 1,
+      "flatten_terrain": 1
+     },
+     {
+      "position": {
+       "x": 3.68967533,
+       "y": -101.888611
+      },
+      "radius": 28.0299034,
+      "flattening_intensity": 1,
+      "flatten_terrain": 1
+     },
+     {
+      "position": {
+       "x": 44.6667824,
+       "y": -102.130569
+      },
+      "radius": 28.0299034,
+      "flattening_intensity": 1,
+      "flatten_terrain": 1
+     },
+     {
+      "position": {
+       "x": 14.3987503,
+       "y": 47.7420502
+      },
+      "radius": 54.4393196,
+      "flattening_intensity": 1,
+      "flatten_terrain": 1
+     },
+     {
+      "position": {
+       "x": -49.8148651,
+       "y": -19.664299
+      },
+      "radius": 54.4393196,
+      "flattening_intensity": 1,
+      "flatten_terrain": 1
+     },
+     {
+      "position": {
+       "x": 36.9712296,
+       "y": -27.986002
+      },
+      "radius": 54.4393196,
+      "flattening_intensity": 1,
+      "flatten_terrain": 1
+     }
+    ],
+    "collision_rectangles": [],
+    "entrypoints": [],
+    "splines": [],
+    "extensions": [],
+    "proxies": [],
+    "rotation_type": "StampRotationType_random"
+   }
+  },
+  {
+   "mission": "deploy_dark_fluid",
+   "archive": "8ac0fe970e89087f",
+   "level": "b10c9886d3006fd4",
+   "entry_index": 4052,
+   "key": 12757739549266833364,
+   "stamp": {
+    "collision_circles": [
+     {
+      "position": {
+       "x": -4.28760719,
+       "y": -25.4666138
+      },
+      "radius": 80.4674225,
+      "flattening_intensity": 1,
+      "flatten_terrain": 1
+     },
+     {
+      "position": {
+       "x": 32.771595,
+       "y": 25.0145645
+      },
+      "radius": 100.351059,
+      "flattening_intensity": 1,
+      "flatten_terrain": 1
+     },
+     {
+      "position": {
+       "x": -37.8434525,
+       "y": 58.1099472
+      },
+      "radius": 74.1092911,
+      "flattening_intensity": 1,
+      "flatten_terrain": 1
+     },
+     {
+      "position": {
+       "x": -63.340889,
+       "y": 37.7260628
+      },
+      "radius": 91.4956512,
+      "flattening_intensity": 1,
+      "flatten_terrain": 1
+     }
+    ],
+    "collision_rectangles": [],
+    "entrypoints": [],
+    "splines": [],
+    "extensions": [],
+    "proxies": [],
+    "rotation_type": "StampRotationType_random"
+   }
+  }
+ ]
+}
