@@ -1,12 +1,6 @@
----
-name: darkfluid-mission-trigger
-description: "Why Deploy Dark Fluid (mission row 93) can only be drawn by template 6, and how to bring it up on 25480438"
-metadata:
-  node_type: memory
-  type: project
-  originSessionId: 0fc97165-1f9a-441b-9813-8d2d39922ec9
-  modified: 2026-11-26T08:03:03.070Z
----
+# 研究紀錄（逐版測試結果與發現）
+
+原文是工作筆記，英文為主；整理過的結論見 [HANDOFF.md](HANDOFF.md)。其中 `[[...]]` 是筆記之間的連結，可忽略。
 
 Checked 2026-11-26 from analysis/image/game-25480438.bin:
 - Mission row 93 DEPLOY DARK FLUID (id 3858764807): enabled, faction 2, difficulty 1–11, kind (+0x34) = 3, region [1] normal. The other kind-3 bug missions are 90, 91 (ACTIVATE TCS+ STATION, live), 92 and 71.
