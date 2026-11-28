@@ -8,7 +8,7 @@ import hd2data as hd
 import convert_level as cl
 
 sys.stdout.reconfigure(encoding="utf-8")
-old, cur = hd.DataDir(r"F:\Game\A\HD2\A\0\hd2_old\20240601\data"), hd.DataDir(r"F:\Game\A\HD2\HellForgev5\game\data")
+old, cur = hd.DataDir(os.environ.get("HD2_OLD_DATA", r"F:\Game\A\HD2\A\0\hd2_old\20240601\data")),hd.DataDir(r"F:\Game\A\HD2\HellForgev5\game\data")
 L = hd.TYPE["level"]
 stats, errs = collections.Counter(), collections.Counter()
 diffs = []

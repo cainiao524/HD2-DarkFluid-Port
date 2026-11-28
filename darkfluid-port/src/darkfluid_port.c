@@ -20,6 +20,7 @@
 #include <windows.h>
 #include <stdio.h>
 #include <string.h>
+#include "df_resources.h"
 
 #define BUILD "25480438"
 #define RVA_MISSIONS 0x3773420u
@@ -1186,78 +1187,278 @@ static void RestartDetour(void* entry, void* ctx)
     g_restartOriginal(entry, ctx);
 }
 
-/* 1.0.0: the D9 crash. The objective setup walks the level tree (game.dll 0x5D2BB0: EngineApi +0x50 domain, +0x48/+0x50
- * sub-levels, +0x58/+0x60 units) and passes each unit to 0x5D2CE0, which hands it to the engine; at D9 one of the Dark
- * Fluid site's units is NULL (removed at that difficulty while still counted) and helldivers2.exe+0x32F6CE reads it.
- * The detour skips a NULL unit and counts it. */
-#define RVA_OBJ_UNIT 0x5D2CE0u
-#define OBJ_UNIT_BYTES "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 48 89 7C 24 20 41 54 41 56"
+/* 1.0.4: the D9 crash. The objective setup walks the level tree (game.dll 0x5D2BB0 -> 0x5D2CE0, which recurses into
+ * each unit's children) and registers each unit's objective nodes in 0x5D22B0(manager, objective index, unit, filters,
+ * kind). 0x5D22B0 looks the unit up in the stamp settings' S2 table (manager+8 -> +0x2CC8 buckets of 0x38, key at +0x20
+ * = EngineApi+0x168 [+0x50](unit), S0 start/count at +0x28/+0x2C, records of 0x44 at +0x2C60, u16 node index at +0),
+ * asks the engine for each node's handle (EngineApi+0x168 [+0](unit, index)), keeps a handle that passes the filters
+ * (EngineApi+0x18 [+0x730](handle, filter) for the 8 filters of 0x18 bytes, or for kind 3/4 the [[[EngineApi+0xB8]]]
+ * test), and hands it to EngineApi+0x18 [+0x750](handle). At D9 that call ends in helldivers2.exe+0x32F6CE, reading the
+ * NULL that helldivers2.exe+0x9D8C0 returns for the handle (a guess: +0x750 passes the handle on to 0x32F6A0). 1.0.2 tested
+ * the objective index instead of the handle (0x5D22B0 indexes objectives with it: [manager+0x60] + index * 0x1078), so
+ * it dropped every unit of objective 0 and their children at D1 and still let the D9 one through. This detour repeats
+ * 0x5D22B0's lookups and skips only a unit one of whose kept handles has no object; the rest, and the recursion, is the
+ * game's own. */
+#define RVA_OBJ_UNITS 0x5D22B0u
+#define OBJ_UNITS_BYTES "4C 89 44 24 18 53 55 56 57 41 55 48 83 EC 40"
+/* 1.0.11: the guard sits on the walk itself (0x5D2CE0: the unit's own nodes via 0x5D22B0, then each child through
+ * EngineApi+0x168 [+0x18] / [+0x20], recursing). */
+#define RVA_OBJ_WALK 0x5D2CE0u
+#define OBJ_WALK_BYTES "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 48 89 7C 24 20 41 54 41 56"
+#define RVA_ENGINE_API 0x3326308u
 typedef void (*ObjUnitFn)(void* a, uint32_t b, void* unit, void* d, uint32_t e);
 static ObjUnitFn g_objUnitOriginal;
-static volatile LONG g_nullUnits;
+static volatile LONG g_unitsChecked;
 
 static int g_resOffset; /* defined with the WorldSpawnUnit hook below */
 static uint64_t g_unitRing[8];
 static volatile LONG g_unitRingPos;
 
-/* 1.0.1: the crash is inside the engine on a unit that is not NULL but whose data is (helldivers2.exe+0x32F6CE reads
- * a NULL pointer it got for that unit). The last units the walk handed over are kept, and an exception handler names
- * them when that access violation happens; the game then crashes as before. */
+/* 1.0.5: the D9/D10/D11 landing crash is survived. 1.0.4's look-ahead never fired (the crash is not on a handle
+ * without an object), so the detour now records the CPU state (RtlCaptureContext) before it hands a unit to the game;
+ * when helldivers2.exe+0x32F6CE then reads its NULL on that thread, the handler puts the CPU back at that point and
+ * the detour skips that unit's objective nodes (its children are still walked by the game). Only this one address,
+ * only inside the detour's own call. */
+/* 1.0.9: per thread. Units are set up on more than one thread: with one shared state another thread's call cleared
+ * the armed mark (and overwrote the saved CPU state), so 1.0.7's D9 crash came "outside the guard". Each thread now
+ * has its own block (TLS slot, page-aligned for the CONTEXT). */
+/* 1.0.11: the walk recurses, so each thread keeps a stack of saved states, one per level. The D9 crash is
+ * helldivers2.exe+0x9D8C0 (unit handle -> unit, checked against the handle's generation) returning NULL for a unit the
+ * walk still lists but the difficulty took out, and an engine call (EngineApi+0x168 [+0x50] is helldivers2.exe+0x32F6A0)
+ * using it unchecked; the crash can come from the unit's own nodes or from its child walk, so the whole level is
+ * guarded: on an access violation in the game's code while a level is armed, that level returns (the unit and its
+ * children are skipped) and the walk goes on. */
+#define GUARD_DEPTH 48
+typedef struct { CONTEXT ctx[GUARD_DEPTH]; volatile LONG depth, hit[GUARD_DEPTH]; } Guard;
+static DWORD g_guardTls = TLS_OUT_OF_INDEXES;
+static Guard* ThreadGuard(void)
+{
+    if (g_guardTls == TLS_OUT_OF_INDEXES) return NULL;
+    Guard* g = (Guard*)TlsGetValue(g_guardTls);
+    if (!g)
+    {
+        g = (Guard*)VirtualAlloc(NULL, sizeof(Guard), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+        if (g) TlsSetValue(g_guardTls, g);
+    }
+    return g;
+}
+static uint64_t g_lastUnitKey; /* the S2 key of the unit last looked at (EngineApi+0x168 [+0x50]) */
+static volatile LONG g_guardSaves;
+static volatile uintptr_t g_guardRip;
+
+/* Names the code around a crash the mod does not handle: the return addresses on the stack that fall in game.dll or
+ * helldivers2.exe, and 64 bytes at the faulting instruction, for offline disassembly. */
+static void LogCrashSite(EXCEPTION_POINTERS* ep, const char* what)
+{
+    HMODULE exe = GetModuleHandleA(NULL);
+    uintptr_t rip = (uintptr_t)ep->ExceptionRecord->ExceptionAddress, e = (uintptr_t)exe;
+    CONTEXT* c = ep->ContextRecord;
+    hf->log(g_mod, "%s: rip exe+%#llx, reading %#llx; rax %llx rbx %llx rcx %llx rdx %llx rsi %llx rdi %llx r8 %llx r9 %llx r12 %llx r13 %llx r14 %llx r15 %llx",
+            what, (unsigned long long)(rip - e), (unsigned long long)ep->ExceptionRecord->ExceptionInformation[1],
+            (unsigned long long)c->Rax, (unsigned long long)c->Rbx, (unsigned long long)c->Rcx, (unsigned long long)c->Rdx, (unsigned long long)c->Rsi,
+            (unsigned long long)c->Rdi, (unsigned long long)c->R8, (unsigned long long)c->R9, (unsigned long long)c->R12, (unsigned long long)c->R13,
+            (unsigned long long)c->R14, (unsigned long long)c->R15);
+    uint8_t code[64] = {0};
+    char hx[64 * 2 + 1] = {0};
+    if (Rd(rip - 32, code, sizeof code)) { for (int k = 0; k < 64; k++) sprintf(hx + 2 * k, "%02x", code[k]); hf->log(g_mod, "%s: code at rip-32: %s", what, hx); }
+    char line[1024];
+    size_t at = 0;
+    int found = 0;
+    for (int k = 0; k < 512 && found < 24; k++)
+    {
+        uint64_t v = 0;
+        if (!Rd((uintptr_t)c->Rsp + 8u * k, &v, 8)) break;
+        const char* mod = NULL;
+        uintptr_t off = 0;
+        if (v > e && v < e + 0x4000000u) { mod = "exe"; off = v - e; }
+        else if (g_game && v > g_game && v < g_game + 0x4000000u) { mod = "game"; off = v - g_game; }
+        if (!mod) continue;
+        found++;
+        at += (size_t)snprintf(line + at, sizeof line - at, " %s+%#llx", mod, (unsigned long long)off);
+        if (at > sizeof line - 40) break;
+    }
+    hf->log(g_mod, "%s: stack:%s", what, found ? line : " nothing in exe or game.dll");
+}
+
 static LONG WINAPI CrashNamer(EXCEPTION_POINTERS* ep)
 {
-    static volatile LONG once;
+    static volatile LONG once, other;
     HMODULE exe = GetModuleHandleA(NULL);
     uintptr_t rip = (uintptr_t)ep->ExceptionRecord->ExceptionAddress;
-    if (ep->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && rip == (uintptr_t)exe + 0x32F6CEu && InterlockedExchange(&once, 1) == 0)
+    if (ep->ExceptionRecord->ExceptionCode != EXCEPTION_ACCESS_VIOLATION) return EXCEPTION_CONTINUE_SEARCH;
+    int inGame = (rip > (uintptr_t)exe && rip < (uintptr_t)exe + 0x4000000u) || (g_game && rip > g_game && rip < g_game + 0x4000000u);
+    Guard* tg = (inGame && g_guardTls != TLS_OUT_OF_INDEXES) ? (Guard*)TlsGetValue(g_guardTls) : NULL;
+    if (tg && tg->depth > 0 && tg->depth <= GUARD_DEPTH)
+    {
+        LONG at = tg->depth - 1;
+        g_guardRip = rip;
+        tg->hit[at] = 1;
+        tg->depth = at;
+        memcpy(ep->ContextRecord, &tg->ctx[at], sizeof tg->ctx[at]);
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
+    if (rip == (uintptr_t)exe + 0x32F6CEu && InterlockedExchange(&once, 1) == 0)
     {
         LONG at = g_unitRingPos;
         for (int k = 0; k < 8; k++)
         {
             uint64_t r = g_unitRing[(at - k + 8 * 1024) % 8];
-            hf->log(g_mod, "CRASH at helldivers2.exe+0x32F6CE: unit %d back in the objective walk: resource %016llx", k, (unsigned long long)r);
+            hf->log(g_mod, "CRASH at helldivers2.exe+0x32F6CE outside the guard: unit %d back in the objective walk: %016llx", k, (unsigned long long)r);
         }
+        LogCrashSite(ep, "CRASH 0x32F6CE");
+        /* 1.0.12: why the guard did not take it */
+        Guard* why = g_guardTls != TLS_OUT_OF_INDEXES ? (Guard*)TlsGetValue(g_guardTls) : NULL;
+        hf->log(g_mod, "CRASH 0x32F6CE: guard on this thread (%lu): tls %lu, block %p, depth %ld; walk calls so far %ld",
+                (unsigned long)GetCurrentThreadId(), (unsigned long)g_guardTls, (void*)why, why ? (long)why->depth : -1L, (long)g_unitsChecked);
     }
+    /* first-chance: the game may handle some itself, so up to three are named */
+    else if (rip > (uintptr_t)exe && rip < (uintptr_t)exe + 0x4000000u && rip != (uintptr_t)exe + 0x32F6CEu && InterlockedIncrement(&other) <= 3)
+        LogCrashSite(ep, "access violation in helldivers2.exe");
     return EXCEPTION_CONTINUE_SEARCH;
+}
+
+typedef uint32_t (*NodeFn)(void* unit, uint32_t index);
+typedef uint64_t (*UnitKeyFn)(void* unit);
+typedef int (*FilterFn)(uint32_t handle, uint64_t filter);
+typedef int (*KindFn)(uint32_t handle, uint32_t one, uint32_t hash);
+typedef void* (*HandleObjFn)(uint32_t handle);
+
+/* 1 when 0x5D22B0 would hand the engine a handle with no object (node index in *bad), 0 when not, -1 when the tables
+ * are not as expected (then the game's own code runs). */
+static int UnitHasDeadNode(void* a, void* unit, void* filters, uint32_t kind, uint32_t* bad, uint32_t* nodes)
+{
+    uintptr_t api = 0, api168 = 0, api18 = 0, fn0 = 0, fn50 = 0, f730 = 0, mgr = 0, tbl = 0, recs = 0;
+    uint64_t empty = 0;
+    uint32_t n = 0;
+    static HandleObjFn handleObj;
+    *nodes = 0;
+    if (!handleObj) handleObj = (HandleObjFn)((uintptr_t)GetModuleHandleA(NULL) + 0x9D8C0u);
+    if (!Rd(g_game + RVA_ENGINE_API, &api, 8) || !api || !Rd(api + 0x168, &api168, 8) || !api168 || !Rd(api + 0x18, &api18, 8) || !api18) return -1;
+    if (!Rd(api168, &fn0, 8) || !Rd(api168 + 0x50, &fn50, 8) || !Rd(api18 + 0x730, &f730, 8) || !fn0 || !fn50 || !f730) return -1;
+    if (!Rd((uintptr_t)a + 8, &mgr, 8) || !mgr) return -1;
+    if (!Rd(mgr + 0x2CD0, &n, 4) || !Rd(mgr + 0x2CC8, &tbl, 8) || !Rd(mgr + 0x2C60, &recs, 8) || !Rd(mgr + 0x2CF8, &empty, 8)) return -1;
+    if (!n || !tbl || !recs || (n & (n - 1))) return -1;
+    uint64_t key = ((UnitKeyFn)fn50)(unit);
+    g_lastUnitKey = key;
+    uintptr_t e = 0;
+    for (uint32_t i = 0; i < n; i++)
+    {
+        uintptr_t at = tbl + (uintptr_t)(((uint64_t)i + 2 * key) & (n - 1)) * 0x38u;
+        uint64_t k = 0;
+        if (!Rd(at + 0x20, &k, 8)) return -1;
+        if (k == key) { e = at; break; }
+        if (k == empty) break;
+    }
+    if (!e) return 0;
+    uint32_t start = 0, count = 0;
+    Rd(e + 0x28, &start, 4); Rd(e + 0x2C, &count, 4);
+    *nodes = count;
+    for (uint32_t j = 0; j < count && j < 4096; j++)
+    {
+        uint16_t index = 0;
+        if (!Rd(recs + (uintptr_t)(start + j) * 0x44u, &index, 2)) return -1;
+        uint32_t h = ((NodeFn)fn0)(unit, index);
+        if (!h) continue;
+        int keep = 0;
+        for (int f = 0; f < 8 && !keep; f++)
+        {
+            uint64_t filter = 0;
+            if (!Rd((uintptr_t)filters + 0x18u * f, &filter, 8)) return -1;
+            keep = ((FilterFn)f730)(h, filter) != 0;
+        }
+        if (!keep && (kind == 3 || kind == 4))
+        {
+            uintptr_t o = 0, v = 0, fn = 0;
+            if (Rd(api + 0xB8, &o, 8) && o && Rd(o, &v, 8) && v && Rd(v, &fn, 8) && fn)
+                keep = ((KindFn)fn)(h, 1, kind == 3 ? 0x2B0D20E2u : 0xCD8D0B8Bu) != 0;
+        }
+        if (keep && !handleObj(h)) { *bad = index; return 1; }
+    }
+    return 0;
 }
 
 static void ObjUnitDetour(void* a, uint32_t b, void* unit, void* d, uint32_t e)
 {
-    if (unit)
+    (void)UnitHasDeadNode;
+    (void)g_lastUnitKey;
     {
-        uint64_t res = 0;
-        if (g_resOffset >= 0) Rd((uintptr_t)unit + (uintptr_t)g_resOffset, &res, 8);
         LONG at = InterlockedIncrement(&g_unitRingPos);
-        g_unitRing[at % 8] = res ? res : (uint64_t)(uintptr_t)unit;
+        g_unitRing[at % 8] = (uint64_t)(uintptr_t)unit;
     }
-    /* 1.0.2: the engine function the walk ends in (helldivers2.exe+0x32F6A0) first looks its second argument (this
-     * call's b) up with helldivers2.exe+0x9D8C0 and uses the result unchecked; at D9 that lookup is NULL. Ask the same
-     * lookup first and skip the unit when it has nothing. */
+    InterlockedIncrement(&g_unitsChecked);
+    Guard* g = ThreadGuard();
+    if (!g || g->depth < 0 || g->depth >= GUARD_DEPTH) { g_objUnitOriginal(a, b, unit, d, e); return; }
+    LONG my = g->depth;
+    g->hit[my] = 0;
+    RtlCaptureContext(&g->ctx[my]);
+    if (g->hit[my])
     {
-        typedef void* (*LookupFn)(uint32_t id);
-        static LookupFn lookup;
-        if (!lookup) lookup = (LookupFn)((uintptr_t)GetModuleHandleA(NULL) + 0x9D8C0u);
-        if (unit && !lookup(b))
-        {
-            LONG n = InterlockedIncrement(&g_nullUnits);
-            if (n <= 20) hf->log(g_mod, "objective setup: id %#x has no object (the D9 crash): unit skipped (#%ld)", b, n);
-            return;
-        }
-    }
-    if (!unit)
-    {
-        LONG n = InterlockedIncrement(&g_nullUnits);
-        if (n <= 20) hf->log(g_mod, "objective setup: a NULL unit skipped (#%ld, index %u)", n, b);
+        g->hit[my] = 0;
+        g->depth = my;
+        HMODULE exe = GetModuleHandleA(NULL);
+        uintptr_t r = g_guardRip;
+        LONG n = InterlockedIncrement(&g_guardSaves);
+        if (n <= 30) hf->log(g_mod, "objective setup: crash at %s+%#llx caught on objective %u, unit handle %#llx (walk level %ld): that unit and its children skipped, the game goes on (#%ld)",
+                             (r > (uintptr_t)exe && r < (uintptr_t)exe + 0x4000000u) ? "helldivers2.exe" : "game.dll",
+                             (unsigned long long)(r - ((r > (uintptr_t)exe && r < (uintptr_t)exe + 0x4000000u) ? (uintptr_t)exe : g_game)), b,
+                             (unsigned long long)(uintptr_t)unit, (long)my, n);
         return;
     }
+    g->depth = my + 1;
+    {
+        static volatile LONG firstLogged;
+        if (InterlockedExchange(&firstLogged, 1) == 0)
+            hf->log(g_mod, "objective unit walk: first guarded call on thread %lu (tls %lu, block %p)", (unsigned long)GetCurrentThreadId(), (unsigned long)g_guardTls, (void*)g);
+    }
     g_objUnitOriginal(a, b, unit, d, e);
+    g->depth = my;
+}
+
+/* 1.0.13: the D4+ landing crash, found with the crash dump (the guard reported depth 0: it is not in the unit walk).
+ * The objective setup (game.dll 0x5D0DE0) lists the level objects an objective names (EngineApi+0x18 [+0x768]), asks
+ * the level for each object's handle (EngineApi+0x50 [+0x30]) and reads that object's script data under key 0x2AA21BB6
+ * through [[[EngineApi+0xB8]]]+0x10 = helldivers2.exe+0x32F6A0 (out, handle, 1, key), at game.dll 0x5D1546. From
+ * difficulty 4 the Dark Fluid levels leave some of those objects out (their difficulty layers), so the handle names no
+ * object: helldivers2.exe+0x9D8C0 returns NULL and 0x32F6A0 reads through it (+0x32F6CE). The detour asks the same
+ * lookup first and, for a handle with no object, returns an empty result (16 zero bytes: no string), which the caller
+ * already skips (0x5D1556 / 0x5D1564). */
+#define EXE_SCRIPT_DATA 0x32F6A0u
+#define EXE_SCRIPT_DATA_BYTES "44 89 44 24 18 4C 89 4C 24 20 55 53 56 57 41 56 41 57"
+typedef void* (*ScriptReadFn)(void* out, uint32_t handle, uint32_t one, uint64_t key);
+static ScriptReadFn g_scriptDataOriginal;
+static volatile LONG g_scriptDataSkips;
+
+static void* ScriptDataDetour(void* out, uint32_t handle, uint32_t one, uint64_t key)
+{
+    static HandleObjFn handleObj;
+    if (!handleObj) handleObj = (HandleObjFn)((uintptr_t)GetModuleHandleA(NULL) + 0x9D8C0u);
+    if (out && !handleObj(handle))
+    {
+        memset(out, 0, 16);
+        LONG n = InterlockedIncrement(&g_scriptDataSkips);
+        if (n <= 20) hf->log(g_mod, "script data: handle %#x has no object (key %#llx): empty result, the caller skips it (#%ld)", handle, (unsigned long long)key, n);
+        return out;
+    }
+    return g_scriptDataOriginal(out, handle, one, key);
+}
+
+static void HookScriptData(void)
+{
+    uintptr_t at = (uintptr_t)GetModuleHandleA(NULL) + EXE_SCRIPT_DATA;
+    if (hf->code_matches(at, EXE_SCRIPT_DATA_BYTES) && hf->hook(g_mod, at, (void*)ScriptDataDetour, (void**)&g_scriptDataOriginal) == 0)
+        hf->log(g_mod, "hooked the script data read (helldivers2.exe+0x32F6A0): a dead object handle gets an empty result");
+    else { g_scriptDataOriginal = NULL; hf->log(g_mod, "script data read (helldivers2.exe+0x32F6A0): not hooked"); }
 }
 
 static void HookRestart(void)
 {
-    if (hf->code_matches(g_game + RVA_OBJ_UNIT, OBJ_UNIT_BYTES) &&
-        hf->hook(g_mod, g_game + RVA_OBJ_UNIT, (void*)ObjUnitDetour, (void**)&g_objUnitOriginal) == 0)
+    HookScriptData();
+    (void)RVA_OBJ_UNITS;
+    if (hf->code_matches(g_game + RVA_OBJ_WALK, OBJ_WALK_BYTES) &&
+        hf->hook(g_mod, g_game + RVA_OBJ_WALK, (void*)ObjUnitDetour, (void**)&g_objUnitOriginal) == 0)
     {
-        hf->log(g_mod, "hooked the objective unit walk (NULL-unit guard)");
+        g_guardTls = TlsAlloc();
+        hf->log(g_mod, "hooked the objective unit walk (D9 crash guard%s)", g_guardTls == TLS_OUT_OF_INDEXES ? ", but no TLS slot: unguarded" : ", a stack per thread");
         AddVectoredExceptionHandler(1, CrashNamer);
     }
     else { g_objUnitOriginal = NULL; hf->log(g_mod, "objective unit walk: not hooked"); }
@@ -1523,9 +1724,14 @@ static const struct { uint64_t res; const char* name; } kWatch[] = {
 #define WATCH_N (sizeof kWatch / sizeof kWatch[0])
 static volatile LONG g_watchCount[WATCH_N];
 
+static volatile ULONGLONG g_vesselTick;
+static uint32_t g_dfMissionId; /* 1.0.10: the current Dark Fluid mission (its deploy objective id) and when it began */
+static ULONGLONG g_dfMissionTick;
+
 static uint64_t SpawnEntityDetour(void* manager, uint32_t entity, uint64_t resource, const uint8_t* info, uint64_t s5, uint64_t s6)
 {
     uint64_t r = g_spawnEntOriginal(manager, entity, resource, info, s5, s6);
+    if (resource == 0x073270650F859DD0ull) g_vesselTick = GetTickCount64(); /* 1.0.6: the vessel is down */
     for (size_t i = 0; i < WATCH_N; i++)
         if (kWatch[i].res == resource)
         {
@@ -1705,7 +1911,8 @@ static void PlaceItems(uintptr_t pass, uint64_t templateKey)
         /* 0.9.8 test: DF1 alone. 0.9.7 entered D1 but crashed at D9 while setting up the third objective entity
          * (game.dll 0x5D22DF passes a null object to the engine, helldivers2.exe+0x32F6CE); DF1 and DF2 are drawn at
          * random, so this tells whether DF2's site is the broken one. */
-        if (key == 0xB10C9886D3006FD4ull) { done++; continue; }
+        /* 1.0.5: DF2 back. DF1 alone still crashed at D9, so the crash is not DF2's; the two sites are the mission's
+         * terrain variants (1.001.104 has levels for these two and the backpack site only). */
         if (FindItem(key, NULL)) { done++; continue; }
         uint8_t item[LOCATION_ITEM];
         /* 0.5.5 test: the template's own radius (+0xD8..+0xE4 kept) instead of the stamps' 2024 outer radii (143-187 m),
@@ -2061,6 +2268,44 @@ static int WriteWhole(const char* path, const void* data, uint32_t size)
     return w == size;
 }
 
+/* 1.0.8: the unpacked helldivers2.exe image, once, for offline disassembly (as game-25480438.bin was made for game.dll):
+ * the third-drill crash (helldivers2.exe+0x20D81E / +0x20D8DC) and the landing crash (+0x32F6A0) are in the exe, which
+ * is packed on disk. Unreadable pages are written as zeros. Skipped when the file is there. */
+#define EXE_DUMP "E:/File/Codes/0/Claude/26.11.1/HD2/darkfluidbackoprt/analysis/image/helldivers2-25480438.bin"
+static void DumpExeImage(void)
+{
+    static int done;
+    if (done) return;
+    done = 1;
+    FILE* f = fopen(EXE_DUMP, "rb");
+    if (f) { fclose(f); return; }
+    uintptr_t base = (uintptr_t)GetModuleHandleA(NULL);
+    IMAGE_DOS_HEADER dos;
+    IMAGE_NT_HEADERS64 nt;
+    if (!Rd(base, &dos, sizeof dos) || dos.e_magic != IMAGE_DOS_SIGNATURE || !Rd(base + (uintptr_t)dos.e_lfanew, &nt, sizeof nt) || nt.Signature != IMAGE_NT_SIGNATURE)
+    { hf->log(g_mod, "exe dump: no PE header at %#llx", (unsigned long long)base); return; }
+    uint32_t size = nt.OptionalHeader.SizeOfImage;
+    f = fopen(EXE_DUMP, "wb");
+    if (!f) { hf->log(g_mod, "exe dump: cannot write " EXE_DUMP); return; }
+    static uint8_t page[0x10000];
+    uint32_t bad = 0;
+    for (uint32_t o = 0; o < size; o += sizeof page)
+    {
+        uint32_t n = size - o < sizeof page ? size - o : (uint32_t)sizeof page;
+        if (!Rd(base + o, page, n))
+        {
+            for (uint32_t p = 0; p < n; p += 0x1000)
+            {
+                uint32_t k = n - p < 0x1000 ? n - p : 0x1000;
+                if (!Rd(base + o + p, page + p, k)) { memset(page + p, 0, k); bad++; }
+            }
+        }
+        fwrite(page, 1, n, f);
+    }
+    fclose(f);
+    hf->log(g_mod, "exe dump: helldivers2.exe %#x bytes from %#llx written to " EXE_DUMP " (%u unreadable pages as zeros)", size, (unsigned long long)base, bad);
+}
+
 static void DecryptOldSettings(void)
 {
     static int done;
@@ -2182,6 +2427,223 @@ static void ActivatePayloadSites(void)
     hf->log(g_mod, "payload objective: start active and shown%s", hf->write(rec + 0xA85, zero, 2) == 0 ? "" : " (write refused)");
 }
 
+/* ---- 1.0.4: the objective states and the game's open call (1.0.6: when the payload sites open, below) ----
+ * How the 2024 mission opens them (game.dll 25480438; behaviours 388 objective_bug_tcs_03_backpack on Deploy Dark Fluid
+ * ba58, 389 ..._bridge, 390 ..._thumper on Payload Site 0f19):
+ *   - an objective's state is [ObjectiveManager+0x60] + i * 0x1078 + 0x1018, copied from the replicated record
+ *     [+0x68] + i * 0x64 + 0x20: 0 open, 1 not yet open (start_inactive), 2/3 over. 0x4D7FC0(_, id) -> 0x5D80F0 opens
+ *     one (1 -> 0), 0x4D8030 closes one (0 -> 1); id is the objective's entity id ([+0x50][i] + 8).
+ *   - Deploy (388) on event 0x8ED59ACA advances its own objective (0x5D7CE0) and sends 0x0F197F6D; each Payload Site
+ *     (390) on 0x0F197F6D opens its objective when its unit's script data 0xF52812AA is "id_01", "id_02" or "id_03"
+ *     (the stamp level's three bug_fog_generator_tcs units carry them). Deploy completes when its progress (+0x1A0)
+ *     reaches 3.0, one per payload site.
+ * The ObjectiveComponent edit of 1.0.3 never ran (component_record found no record of its own for 0f19). This opens
+ * every Deploy / Payload objective that is not yet open with the game's own call, as the 0x0F197F6D event does. */
+#define RVA_OBJ_OPEN 0x4D7FC0u
+#define OBJ_OPEN_BYTES "48 83 EC 28 3B 15"
+typedef void (*ObjOpenFn)(void* unused, uint32_t id);
+/* 0x5D7CE0(ObjectiveManager, id): advances an objective one step (what Deploy Dark Fluid's 0x8ED59ACA handler and its
+ * 3.0-progress update call) */
+#define RVA_OBJ_ADVANCE 0x5D7CE0u
+#define OBJ_ADVANCE_BYTES "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 48 89 7C 24 20 41 56 48 83 EC 20 45 33 F6 8B DA"
+typedef void (*ObjAdvanceFn)(void* manager, uint32_t id);
+
+/* 1.0.6: the payload sites open when the 2024 mission opened them, not at the start.
+ *   Payload Site (390) events, 0x36DA50 (by its unit's script data 0xF52812AA id_01/id_02/id_03):
+ *     0x0F197F6D opens every site; OnLanded (0x6293C393, its drill landing) opens that site;
+ *     0x1F5A9C3D on id_01 / 0x9A7247A2 on id_02 / 0xD3EA2FD4 on id_03 start that site's drill stages and broadcast
+ *     0x311E1A6E / 0xDF42086C / 0x6FEC3362, which close the other two (0x311E1A6E closes id_02 and id_03,
+ *     0x6FEC3362 closes id_01 and id_02): one site drills at a time.
+ *   Deploy Dark Fluid (388) events, 0x36D060: 0x8ED59ACA (the engine sends it when an objective's unit is replaced,
+ *     0x5DB6E0: the vessel taking over the deploy objective) advances the deploy objective and broadcasts 0x0F197F6D;
+ *     0x8EFF1CFE (a site's drill finished) adds 1 to its progress (+0x1A0); at 3.0 it completes.
+ * So the sites stay closed and hidden until the vessel is down. The mod waits for that (the deploy objective's step,
+ * replicated record +0x18, moving on, or the first Dark Fluid vessel 0732 spawning), gives the game 5 s to open the
+ * sites itself (logged either way), then opens a site that was never opened with the game's own call, as 0x0F197F6D
+ * would. After that the game alone opens and closes them. */
+static void OpenAllObjectives(void)
+{
+    static int checked = 0;
+    static ObjOpenFn open;
+    static uint32_t lastState[16], lastStep[16];
+    static uint32_t missionDeploy, initStep;
+    static ULONGLONG missionStart, trigger;
+    if (!checked)
+    {
+        checked = 1;
+        if (hf->code_matches(g_game + RVA_OBJ_OPEN, OBJ_OPEN_BYTES)) open = (ObjOpenFn)(g_game + RVA_OBJ_OPEN);
+        hf->log(g_mod, "objectives: payload opening %s", open ? "ready (game.dll+0x4D7FC0)" : "off: game.dll+0x4D7FC0 not the reviewed code");
+    }
+    HfObjectiveManager* m = hf_global_ObjectiveManager(g_mod);
+    uint32_t n = 0;
+    uint64_t ents = 0, objs = 0, net = 0;
+    if (!open || !m || !Rd((uintptr_t)m + 0x24, &n, 4) || n == 0 || n > 16) return;
+    if (!Rd((uintptr_t)m + 0x50, &ents, 8) || !ents || !Rd((uintptr_t)m + 0x60, &objs, 8) || !objs || !Rd((uintptr_t)m + 0x68, &net, 8) || !net) return;
+    ULONGLONG now = GetTickCount64();
+    uint64_t hashes[16] = {0};
+    uint32_t ids[16] = {0}, states[16] = {0}, steps[16] = {0};
+    int deploy = -1;
+    for (uint32_t i = 0; i < n; i++)
+    {
+        uint64_t ent = 0;
+        if (!Rd((uintptr_t)ents + 8u * i, &ent, 8) || !ent || !Rd((uintptr_t)ent, &hashes[i], 8) || !Rd((uintptr_t)ent + 8, &ids[i], 4)) continue;
+        if (hashes[i] != ENT_PAYLOAD && hashes[i] != ENT_DEPLOY) continue;
+        Rd((uintptr_t)objs + (uintptr_t)i * 0x1078u + 0x1018u, &states[i], 4);
+        Rd((uintptr_t)net + (uintptr_t)i * 0x64u + 0x18u, &steps[i], 4);
+        if (hashes[i] == ENT_DEPLOY && deploy < 0) deploy = (int)i;
+        if (states[i] != lastState[i] || steps[i] != lastStep[i])
+        {
+            hf->log(g_mod, "objective %u (%s, id %#x): state %u, step %u", i, hashes[i] == ENT_DEPLOY ? "Deploy Dark Fluid" : "Payload Site", ids[i], states[i], steps[i]);
+            lastState[i] = states[i];
+            lastStep[i] = steps[i];
+        }
+    }
+    if (deploy < 0) return; /* not a Dark Fluid mission */
+    if (ids[deploy] != missionDeploy)
+    {
+        missionDeploy = ids[deploy];
+        g_dfMissionId = missionDeploy;
+        g_dfMissionTick = now;
+        initStep = steps[deploy];
+        missionStart = now;
+        trigger = 0;
+        hf->log(g_mod, "objectives: Dark Fluid mission (deploy id %#x, step %u): payload sites wait for the vessel", missionDeploy, initStep);
+    }
+    if (!trigger)
+    {
+        if (steps[deploy] != initStep)
+        {
+            trigger = now;
+            hf->log(g_mod, "objectives: the deploy objective moved on (step %u -> %u): the vessel is down", initStep, steps[deploy]);
+        }
+        else if (g_vesselTick > missionStart)
+        {
+            trigger = now;
+            hf->log(g_mod, "objectives: a Dark Fluid vessel landed");
+        }
+    }
+    /* The deploy objective starts closed too (state 1 at the mission start; 1.0.1 showed it grey and never opened):
+     * opened once, 5 s into the mission when the game has not. */
+    {
+        static uint32_t deployDone;
+        if (deployDone != ids[deploy])
+        {
+            if (states[deploy] == 0) { deployDone = ids[deploy]; hf->log(g_mod, "objective %d (Deploy Dark Fluid, id %#x): opened by the game itself", deploy, ids[deploy]); }
+            else if (states[deploy] == 1 && now - missionStart >= 5000)
+            {
+                deployDone = ids[deploy];
+                open(NULL, ids[deploy]);
+                uint32_t after = 0;
+                Rd((uintptr_t)objs + (uintptr_t)deploy * 0x1078u + 0x1018u, &after, 4);
+                hf->log(g_mod, "objective %d (Deploy Dark Fluid, id %#x): still closed 5 s in: opened by the mod (state 1 -> %u)", deploy, ids[deploy], after);
+            }
+        }
+    }
+    static uint32_t tries[16], triedId[16], wasOpen[16];
+    for (uint32_t i = 0; i < n; i++)
+    {
+        if (hashes[i] != ENT_PAYLOAD) continue;
+        if (triedId[i] != ids[i]) { triedId[i] = ids[i]; tries[i] = 0; wasOpen[i] = 0; }
+        if (states[i] == 0 && !wasOpen[i])
+        {
+            wasOpen[i] = 1;
+            if (!tries[i]) hf->log(g_mod, "objective %u (Payload Site, id %#x): opened by the game itself%s", i, ids[i], trigger ? "" : " (before the vessel)");
+        }
+        if (!trigger || now - trigger < 5000 || wasOpen[i] || states[i] != 1 || tries[i] >= 3) continue;
+        tries[i]++;
+        open(NULL, ids[i]);
+        uint32_t after = 0;
+        Rd((uintptr_t)objs + (uintptr_t)i * 0x1078u + 0x1018u, &after, 4);
+        hf->log(g_mod, "objective %u (Payload Site, id %#x): the game did not open it 5 s after the vessel: opened by the mod (state 1 -> %u)", i, ids[i], after);
+    }
+    /* 1.0.7: the deploy objective's two steps. In 2024 the vessel taking over the objective (event 0x8ED59ACA)
+     * advanced it once (0x5D7CE0) and the third finished drill (progress 3.0) advanced it again, completing it. Here
+     * the first never comes (the step stays 0 after the vessel), so after the third drill the objective sat on its
+     * last step and the mission could not end. The mod makes the first advance 5 s after the vessel when the game has
+     * not, and, should the deploy objective still be open 15 s after every payload site is done, advances it again. */
+    {
+        static ObjAdvanceFn advance;
+        static int advChecked;
+        static uint32_t advDeploy, firstDone, lateTries;
+        static ULONGLONG allDoneAt;
+        if (!advChecked)
+        {
+            advChecked = 1;
+            if (hf->code_matches(g_game + RVA_OBJ_ADVANCE, OBJ_ADVANCE_BYTES)) advance = (ObjAdvanceFn)(g_game + RVA_OBJ_ADVANCE);
+            hf->log(g_mod, "objectives: deploy advance %s", advance ? "ready (game.dll+0x5D7CE0)" : "off: game.dll+0x5D7CE0 not the reviewed code");
+        }
+        if (!advance) return;
+        if (advDeploy != ids[deploy]) { advDeploy = ids[deploy]; firstDone = 0; lateTries = 0; allDoneAt = 0; }
+        if (!firstDone && trigger && now - trigger >= 5000 && states[deploy] == 0)
+        {
+            firstDone = 1;
+            if (steps[deploy] != initStep) hf->log(g_mod, "objective %d (Deploy Dark Fluid): the game advanced it itself after the vessel (step %u)", deploy, steps[deploy]);
+            else
+            {
+                advance(m, ids[deploy]);
+                uint32_t st = 0;
+                Rd((uintptr_t)net + (uintptr_t)deploy * 0x64u + 0x18u, &st, 4);
+                hf->log(g_mod, "objective %d (Deploy Dark Fluid, id %#x): not advanced by the vessel: advanced by the mod (step %u -> %u)", deploy, ids[deploy], steps[deploy], st);
+            }
+        }
+        uint32_t sites = 0, done = 0;
+        for (uint32_t i = 0; i < n; i++)
+            if (hashes[i] == ENT_PAYLOAD) { sites++; if (states[i] == 2 || states[i] == 3) done++; }
+        if (sites && done == sites && states[deploy] == 0)
+        {
+            if (!allDoneAt) allDoneAt = now;
+            else if (now - allDoneAt >= 15000 && lateTries < 2)
+            {
+                lateTries++;
+                allDoneAt = now;
+                advance(m, ids[deploy]);
+                uint32_t st = 0, s2 = 0;
+                Rd((uintptr_t)net + (uintptr_t)deploy * 0x64u + 0x18u, &st, 4);
+                Rd((uintptr_t)objs + (uintptr_t)deploy * 0x1078u + 0x1018u, &s2, 4);
+                hf->log(g_mod, "objective %d (Deploy Dark Fluid, id %#x): every payload site done but still open 15 s on: advanced by the mod (step %u -> %u, state %u)", deploy, ids[deploy], steps[deploy], st, s2);
+            }
+        }
+        else allDoneAt = 0;
+    }
+}
+
+/* 1.0.10: the magenta ground around the Dark Fluid sites (normal detail kept, colour lost: a texture the engine cannot
+ * have, drawn with its missing-texture stand-in). Every resource the three stamps use (1.001.104 closure plus the
+ * resource pack, df_resources.h) is asked of the engine (CanGetResource) 15 s and 60 s into a Dark Fluid mission;
+ * what it cannot give is listed, counted by kind. */
+static void CheckStampResources(void)
+{
+    static uint32_t done15, done60;
+    if (!g_dfMissionId) return;
+    ULONGLONG age = GetTickCount64() - g_dfMissionTick;
+    int pass = 0;
+    if (age >= 15000 && done15 != g_dfMissionId) { done15 = g_dfMissionId; pass = 15; }
+    else if (age >= 60000 && done60 != g_dfMissionId) { done60 = g_dfMissionId; pass = 60; }
+    if (!pass) return;
+    HfFn_CanGetResource can = hf_fn_CanGetResource(g_mod);
+    if (!can) { hf->log(g_mod, "stamp resources: CanGetResource not available"); return; }
+    const char* kinds[16] = {0};
+    uint32_t total[16] = {0}, missing[16] = {0}, packMissing = 0, shown = 0, nk = 0;
+    for (size_t i = 0; i < DF_RES_COUNT; i++)
+    {
+        uint32_t k = 0;
+        while (k < nk && strcmp(kinds[k], kDfRes[i].kind)) k++;
+        if (k == nk && nk < 16) kinds[nk++] = kDfRes[i].kind;
+        if (k >= 16) continue;
+        total[k]++;
+        if (can(kDfRes[i].type, kDfRes[i].name)) continue;
+        missing[k]++;
+        if (kDfRes[i].pack) packMissing++;
+        if (shown++ < 80)
+            hf->log(g_mod, "stamp resources (%d s): cannot get %s %016llx%s", pass, kDfRes[i].kind, (unsigned long long)kDfRes[i].name,
+                    kDfRes[i].pack ? " (from the resource pack)" : "");
+    }
+    char line[512];
+    size_t at = 0;
+    for (uint32_t k = 0; k < nk; k++) at += (size_t)snprintf(line + at, sizeof line - at, " %s %u/%u", kinds[k], total[k] - missing[k], total[k]);
+    hf->log(g_mod, "stamp resources (%d s into the mission): available%s; %u missing from the resource pack", pass, line, packMissing);
+}
+
 static void Tick(HfMod* mod, float dt, void* user)
 {
     (void)mod; (void)user;
@@ -2196,7 +2658,10 @@ static void Tick(HfMod* mod, float dt, void* user)
     LogGrantDetour();
     LogLoadouts();
     ActivatePayloadSites();
+    OpenAllObjectives();
+    CheckStampResources();
     (void)DecryptOldSettings; /* 0.9.1: off; 1.001.104 is in hd2_old/1001104/dec */
+    (void)DumpExeImage; /* 1.0.14 (v1.0 release): off; it writes to the developer's analysis folder */
     GrantDrill(); /* 0.8.4: finds the tables only; SetDrill puts the drill in for Dark Fluid missions alone */
     /* The stamps' packages, held for the session. hf->load_package only takes catalogued packages or a data spec's
      * own, and these come from the zz.darkfluid-resources patch, so the game's own RequestPackages is called (on this,
@@ -2250,7 +2715,7 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     hf = api; g_mod = mod;
     if (hf->version < 16) return 1;
     if (strcmp(hf->build_id(), BUILD) != 0) { hf->log(mod, "game build %s is not " BUILD ": nothing is done", hf->build_id()); return 0; }
-    hf->log(mod, "1.0.3 (payload sites start active; skips the D9 crash's unit; payload sites as 3 steps from the site's own slots; DF1 only; own small kind-3 map, the site's own landing zone; one Dark Fluid site, clearance 0; payload slot 0..0, no backpack-site item; standard map, no Bugs-subregion requirement): uses the Terminid standard map's subregion clearance for Dark Fluid stamps; places their location items, "
+    hf->log(mod, "1.0.14 = v1.0 release (exe dump off); the D4+ landing crash fixed: a dead level object handle gets empty script data; logs the guard state when the landing crash gets past it; the landing-crash guard on the whole objective unit walk, a stack per thread; checks which stamp resources the engine can have in a Dark Fluid mission; the landing-crash guard per thread; dumps the unpacked helldivers2.exe once for the crash analysis; the deploy objective's vessel step made when the game does not, so it completes after the third drill; landing-crash guard without the look-ahead that crashed itself; payload sites open after the vessel lands, as in 2024, the game's own logic after that; D9-D11 landing crash caught and the unit skipped; DF1 and DF2 both; objectives opened once, then the game's own; every Dark Fluid objective opened with the game's own call; D9 guard on the dead objective node, not objective 0; payload sites start active; payload sites as 3 steps from the site's own slots; DF1 only; own small kind-3 map, the site's own landing zone; one Dark Fluid site, clearance 0; payload slot 0..0, no backpack-site item; standard map, no Bugs-subregion requirement): uses the Terminid standard map's subregion clearance for Dark Fluid stamps; places their location items, "
                  "loads their packages and hooks GenerateMissionStampList to "
                  "give them their objective types; then makes Deploy Dark Fluid template 6's special mission");
     hf->on(mod, HF_EVENT_ENTITIES_READY, Ready, NULL);

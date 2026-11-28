@@ -2,8 +2,8 @@
   "format": 1,
   "id": "local.darkfluid-port",
   "name": "Dark Fluid & TCS Port",
-  "version": "1.0.3",
-  "description": "將 2024 年的「部署暗流體」任務移植到現行蟲族標準地圖，並接到任務組 6。0.8.9 的暗流體印模沿用現行地圖的子區域間距設定，日誌會記錄地點擺放的失敗旗標。需搭配 zz.darkfluid-resources 資源包；用 host-ops-test 把蟲族星球的任務組設成 6。適用構建 25480438。",
+  "version": "1.0.14",
+  "description": "v1.0：移植 2024 年默里迪亞的「部署暗流體」任務（1.001.104 的印模、設定與資源）。任務組 6 的特殊任務換成部署暗流體，小地圖、40 分鐘、部署 ×1＋投放點 ×3，呼叫容器後開放投放點，用地殼鑽頭放入容器並防守，三個都完成後撤離。需搭配 zz.darkfluid-resources 資源包；房主用 host-ops-test 把蟲族星球的任務組設成 6。所有玩家都要裝同一版。適用構建 25480438。",
   "gameplay": true,
   "code": {
     "dll": "darkfluid_port.dll",
