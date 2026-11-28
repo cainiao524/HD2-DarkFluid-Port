@@ -10,7 +10,8 @@ import hd2data as hd
 import convert_unit as cu
 
 sys.stdout.reconfigure(encoding="utf-8")
-OLD, CUR = r"F:\Game\A\HD2\A\0\hd2_old\20240601\data", r"F:\Game\A\HD2\HellForgev5\game\data"
+OLD = os.environ.get("HD2_OLD_DATA", r"F:\Game\A\HD2\A\0\hd2_old\20240601\data")  # e.g. ...\hd2_old\1001104\data
+CUR = r"F:\Game\A\HD2\HellForgev5\game\data"
 old, cur = hd.DataDir(OLD), hd.DataDir(CUR)
 U = hd.TYPE["unit"]
 limit = int(sys.argv[1]) if len(sys.argv) > 1 else 400

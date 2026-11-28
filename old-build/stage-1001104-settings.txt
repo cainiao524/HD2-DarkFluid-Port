@@ -1,0 +1,15 @@
+regex:^data[\/]game[\/][^\/]+\.dl_bin$
+regex:^data[\/]game[\/]dl_library\.dl_typelib$
+regex:^data[\/]game[\/]game\.dll$
+regex:^data[\/]bundle_database\.data$
+regex:^data[\/]9ba626afa44a3aa3(\..*)?$
+regex:^data[\/]fb04c61383402693(\..*)?$
+regex:^data[\/]8ac0fe970e89087f(\..*)?$
+regex:^data[\/]efd618be21cceeb3(\..*)?$
+regex:^data[\/]271dd102d25ce55c(\..*)?$
+regex:^data[\/]e3319b35c54297f8(\..*)?$
+regex:^data[\/]91f45a686207a351(\..*)?$
+regex:^data[\/]009da023c64d178d(\..*)?$
+regex:^data[\/]3a8b3b44156a9532(\..*)?$
+regex:^data[\/]18715471d03aaf51(\..*)?$
+regex:^data[\/]6b84a00b73496f9c(\..*)?$

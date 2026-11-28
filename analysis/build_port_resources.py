@@ -30,9 +30,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("out")
     ap.add_argument("--set", default="deploy")
+    ap.add_argument("--old", default=OLD, help="old build data folder (e.g. the 1001104 data folder)")
+    ap.add_argument("--cur", default=CUR, help="current build data folder")
+    ap.add_argument("--header", default=HEADER_FROM, help="an existing fat archive file whose header tail is reused")
     a = ap.parse_args()
     archives = SETS["deploy"] + SETS["deactivate"] if a.set == "all" else SETS[a.set]
-    old, cur = hd.DataDir(OLD), hd.DataDir(CUR)
+    old, cur = hd.DataDir(a.old), hd.DataDir(a.cur)
     take, report = {}, collections.Counter()
     for (t, n), es in old.index.items():
         e = next((x for x in es if x.archive in archives), None)
@@ -66,7 +69,7 @@ def main():
             take[k] = (P, ar, old.read(P, ar), b"", b"")
             report["packed package (stamp)"] += 1
     path = os.path.join(a.out, "9ba626afa44a3aa3.patch_0")
-    pw.write_patch(path, list(take.values()), pw.header_tail(HEADER_FROM))
+    pw.write_patch(path, list(take.values()), pw.header_tail(a.header))
     listing = [{"type": hd.TYPES.get(t, t), "name": n, "sizes": [len(m), len(s), len(g)]} for t, n, m, s, g in take.values()]
     with open(os.path.join(a.out, "contents.json"), "w", encoding="utf-8") as f:
         json.dump({"set": a.set, "archives": archives, "report": report, "resources": listing}, f, ensure_ascii=False, indent=1)

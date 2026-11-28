@@ -1,7 +1,9 @@
-"""Ports the Deploy Dark Fluid stamps' generation settings from the 2024-06-01 build into build 25480438.
+"""Ports the Deploy Dark Fluid stamps' generation settings from an old build (1.001.104 preferred, or 2024-06-01) into
+build 25480438. The source must be the build the resource pack was converted from: S0 +0x10 indexes objects in the
+stamp's own level file.
 
 The level generator's stamp settings are one resource in the boot bundle 9ba626afa44a3aa3: type b8fd4d2cede20ed7, name
-8105986402e7f076. Layout (both builds; record size 0x34 in 2024, 0x44 now):
+8105986402e7f076. Layout (all builds; S0 record size 0x34 in 2024-06, 0x38 in 1.001.104, 0x44 now):
 
   u32 version 7, u32 n0, n0 x record      S0  per-stamp records (objects, entity spawns, objective slots)
   u32 n1, n1 x 0x40                      S1  stamp -> objective types hash table: u8 types[32], u64 key, u32 S0 start,
@@ -17,7 +19,7 @@ and, in objective-slot records (+2 & 8), the objective type at +4 (Deploy Dark F
 +0x10 indexes the stamp's own level, which is the 2024 level itself (converted), so it stays. S1 slots: the builder
 puts a key at (2 * key) % n1 with linear probing over free (key 0) buckets.
 
-  python -I port_lgs.py <2024 data> <current data> <out folder>
+  python -I port_lgs.py <old data> <current data> <out folder>
 writes <out>/9ba626afa44a3aa3.patch_0 (+ .gpu_resources, .stream) holding the merged resource.
 """
 import os, struct, sys
@@ -34,8 +36,16 @@ STAMPS = {  # every stamp the 2024 settings give the TCS / Dark Fluid objectives
     "deploy dark fluid, records only (80aca473)": 0x80ACA473FBE35102,
     "deactivate tcs site A (271dd)": 0x465AF3D39AB42964, "deactivate tcs site B (e3319)": 0x004F0E2FC6BCDB32,
     "deactivate tcs, records only (a04d0a19)": 0xA04D0A191031ACAD}
-MAP_2C = {1: 3, 2: 4, 3: 5, 6: 11, 10: 12, 12: 14, 13: 15, 15: 17, 20: 22}  # 12, 13: by the +2 rule
-MAP_TYPE = {24: 26, 25: 27, 26: 28, 27: 29}  # deactivate termicide, mutated eggs, deploy dark fluid, payload site
+# Per source build, keyed by its S0 record size. 2024-06 (0x34): the +0x2C table was read off shared stamps, but part
+# of it is content the artists changed after 2024 (2024 6 is 6 or 9 in 1.001.104), so prefer 1.001.104.
+# 1.001.104 (0x38, last 4 bytes always 0): +0x2C is exactly +2 for every value the 960 shared stamps use, and the
+# objective types 22..28 are +1 (deactivate termicide 25, mutated eggs 26, deploy dark fluid 27, payload site 28).
+SOURCES = {
+    0x34: ("2024-06", {1: 3, 2: 4, 3: 5, 6: 11, 10: 12, 12: 14, 13: 15, 15: 17, 20: 22},
+           {24: 26, 25: 27, 26: 28, 27: 29}),
+    0x38: ("1.001.104", {v: v + 2 for v in range(1, 40)}, {25: 26, 26: 27, 27: 28, 28: 29}),
+}
+MAP_2C, MAP_TYPE = SOURCES[0x34][1], SOURCES[0x34][2]
 
 
 class Settings:
@@ -88,8 +98,22 @@ def convert_record(old):
     return bytes(r)
 
 
+def detect(b):
+    """Picks the source build by the S0 record size the sections parse with."""
+    global MAP_2C, MAP_TYPE
+    for rs, (label, m2c, mtype) in SOURCES.items():
+        try:
+            s = Settings(b, rs)
+        except (ValueError, struct.error):
+            continue
+        MAP_2C, MAP_TYPE = m2c, mtype
+        print(f"source: {label} (S0 record {rs:#x}, {s.n0} records)")
+        return s
+    raise SystemExit("source settings: no known record size")
+
+
 def merge(old_b, cur_b):
-    old, cur = Settings(old_b, 0x34), Settings(cur_b, 0x44)
+    old, cur = detect(old_b), Settings(cur_b, 0x44)
     s0 = bytearray(cur_b[8: 8 + cur.n0 * 0x44])
     n0 = cur.n0
     s5n, s5at, _ = cur.sec["s5"]

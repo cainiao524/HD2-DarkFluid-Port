@@ -774,17 +774,53 @@ static void OfferMission(void)
      * SpreadLocations failed and the level was generated again, forever. The 2024 mission was a full 40-minute map, so
      * this row alone gets the Terminid standard preset; the TCS+ station and every other mission keep theirs, and the
      * kind byte (+0x34) stays 3, so template 6's special slot still draws it. */
+    /* 0.9.3: on again (0.9.2's small map generated at no difficulty; the 2024 mission was 40 minutes, a full map).
+     * 0.9.2 note: the row as the game still has it (kind 3, the small map 0x9510800888744760, as rows 91 and 92) is
+     * the 2024 mission: a short mission. The standard preset was a workaround for registrations copied from other
+     * stamps; the items now carry the 2024 / 1.001.104 registration and shape records. */
     for (uint32_t r = 0; r < MISSION_ROWS; r++)
     {
         uintptr_t row = g_game + RVA_MISSIONS + r * MISSION_ROW;
         uint32_t mid = 0;
         uint64_t preset = 0, standard = MAP_PRESET_BUG_STANDARD;
         if (!Rd(row, &mid, 4) || mid != missionId || !Rd(row + 0x38, &preset, 8)) continue;
-        if (preset == MAP_PRESET_SPECIAL_SMALL && hf->write(row + 0x38, &standard, 8) == 0)
+        /* 0.9.7: the row's own small kind-3 map again. DF1/DF2 hold their own landing zone (a kind-5 record, entity
+         * 7d8876ea, with the bridge f62ebb07: the wiki's extraction "islands"), like the TCS+ station (kind 3, same
+         * map); the standard map adds an extraction of its own (AddImportantLocations), and the two never fit
+         * (0.9.5/0.9.6: two locations, the Dark Fluid site and that extraction, failed every time). */
+        if (0 && preset == MAP_PRESET_SPECIAL_SMALL && hf->write(row + 0x38, &standard, 8) == 0)
             hf->log(g_mod, "offer: mission row %u map preset %016llx -> %016llx (the Terminid standard map, this mission only)", r,
                     (unsigned long long)preset, (unsigned long long)standard);
         else
             hf->log(g_mod, "offer: mission row %u map preset %016llx left as it is", r, (unsigned long long)preset);
+        /* 0.9.4: the payload sites as steps of Deploy Dark Fluid. The row's objective slots ({u32 id, f32 weight, u32,
+         * u32 class, u32 min, u32 max} from +0x40, 0x18 each) give both objectives class 0 (a main objective) and 1..1,
+         * so each took a stamp of its own: two Dark Fluid sites, both of their deploy and payload slots spawned (2
+         * deploy, 6 payload entities), the HUD showed Deploy Dark Fluid twice and no payload site. The game's own
+         * main-plus-steps missions (HALT CYBORG PRODUCTION: main class 0 1..1, steps class 1) put steps in class 1, and
+         * the 2024 mission needed three payload sites (one Dark Fluid site holds a deploy slot and three payload slots;
+         * Payload Site allows 3 per mission). So: Payload Site class 1, 3..3. */
+        for (uint32_t k = 0; k < 32; k++)
+        {
+            uint32_t s[6];
+            uintptr_t at6 = row + 0x40 + 0x18u * k;
+            if (!Rd(at6, s, sizeof s) || !s[0]) continue;
+            if (s[0] == OBJ_PAYLOAD)
+            {
+                /* 0.9.5: 0.9.4's class 1, 3..3 made the generator place a stamp per payload site (4 sites, none fit).
+                 * A Dark Fluid site spawns all its slots (one deploy, three payload) whichever objective it serves, so
+                 * the payload sites come with the Deploy Dark Fluid site itself: this slot places nothing (0..0, as the
+                 * game's own unused step slots). */
+                /* 0.9.9: class 1, 3..3 again: the payload sites must be steps the mission asks for, or they stay
+                 * inactive and hidden (Payload Site's start_inactive, hide_from_ui_if_inactive) and grant no drill
+                 * (0.9.5-0.9.7). No stamp lists their type any more (see InsertObjectiveEntries), so they are not
+                 * placed apart: they are the Dark Fluid site's three payload slots. */
+                uint32_t want[3] = {1u, 3u, 3u};
+                int ok = hf->write(at6 + 12, want, sizeof want) == 0;
+                hf->log(g_mod, "offer: mission row %u slot %u Payload Site class %u min %u max %u -> class 1 min 3 max 3%s", r, k, s[3], s[4], s[5],
+                        ok ? "" : " (write refused)");
+            }
+        }
         break;
     }
     /* the deleted 2024 operation's own name and summary (template +0x24 name, +0x2C summary; +0x28 briefing kept) */
@@ -980,6 +1016,20 @@ static void InsertObjectiveEntries(uintptr_t pass)
         if (have)
         {
             had++;
+            /* 0.9.9: DF1 / DF2 list Deploy Dark Fluid (28) only. Listed with Payload Site (29) too, each payload site
+             * the mission asks for took a stamp of its own (0.9.4). A type no stamp lists is not placed: its objectives
+             * come from the placed stamps' slots (LAUNCH ICBM's main type, 118, has no stamp either), here the Dark
+             * Fluid site's three payload slots, whose records keep type 29. */
+            if (key == 0x0B34988E28A9131Bull || key == 0xB10C9886D3006FD4ull)
+            {
+                uint8_t t[32] = {0};
+                if (Rd(have, t, sizeof t) && !(t[0] == 28 && t[1] == 0))
+                {
+                    uint8_t only[2] = {28, 0};
+                    int ok = hf->write(have, only, 2) == 0;
+                    hf->log(g_mod, "gen %ld: %s: types %u %u -> 28 (Deploy Dark Fluid only)%s", call, kPorted[p].name, t[0], t[1], ok ? "" : ": write refused");
+                }
+            }
             if (call <= 3)
             {
                 uint8_t types[4] = {0};
@@ -1048,10 +1098,207 @@ static void LogStampChoice(uintptr_t rcx, uintptr_t pass, LONG call)
     }
 }
 
+/* ---- 0.8.6: which generator pass sends the level back to the start ----
+ * The pass dispatcher (game.dll+0xC14950: rcx the pass list, 0x19B0 per pass with its op at +0; r8 the index; r9d
+ * the count) runs one pass per call. The ops of the last passes before GenerateMissionStampList runs again are the
+ * pass that failed; logged at each restart (first 30, then every 25th). Op names: 0x8B SpreadLocations, 0x7D the
+ * pocket opener, 0xA4 the route rebuild, 0x16 GenerateObjectiveLocations, 0x15 GenerateMissionStampList. */
+#define RVA_PASS_DISPATCH 0xC14950u
+#define PASS_DISPATCH_BYTES "40 55 53 56 57 41 54 41 56 41 57"
+typedef uint64_t (*DispatchFn)(void* rcx, void* rdx, uint32_t* idx, uint32_t count, uint64_t a5, uint64_t a6);
+static DispatchFn g_dispOriginal;
+static volatile LONG g_opPos, g_opsThisGen;
+static int32_t g_opRing[256];
+
+static uint64_t DispatchDetour(void* rcx, void* rdx, uint32_t* idx, uint32_t count, uint64_t a5, uint64_t a6)
+{
+    uint32_t i = 0;
+    int32_t op = -1;
+    if (idx && Rd((uintptr_t)idx, &i, 4)) Rd((uintptr_t)rcx + (uintptr_t)i * 0x19B0u, &op, 4);
+    LONG at = InterlockedIncrement(&g_opPos);
+    g_opRing[at % 256] = op;
+    InterlockedIncrement(&g_opsThisGen);
+    return g_dispOriginal(rcx, rdx, idx, count, a5, a6);
+}
+
+static void LogRestart(LONG gen)
+{
+    /* 0.8.7: the whole run since the last restart (the new generation's first 7 ops are at the end) */
+    if (!g_dispOriginal || gen < 2 || (gen > 6 && gen % 50)) { g_opsThisGen = 0; return; }
+    LONG at = g_opPos, n = g_opsThisGen > 250 ? 250 : g_opsThisGen;
+    char line[1024] = {0};
+    int w = 0;
+    for (LONG k = n - 1; k >= 0 && w < (int)sizeof line - 4; k--) w += snprintf(line + w, sizeof line - w, " %02x", (unsigned)g_opRing[(at - k + 256 * 64) % 256] & 0xFF);
+    hf->log(g_mod, "restart before gen %ld: %ld passes since the last one:%s", gen, (long)g_opsThisGen, line);
+    g_opsThisGen = 0;
+}
+
+/* 0.8.8: the generator restart itself. game.dll+0xF25E30 sets the pass index (+0x19B004) back to 0 and clears
+ * +0x19B0F0; nothing calls it directly. Its callers' return addresses say which code restarts the level. */
+#define RVA_GEN_RESET 0xF25E30u
+#define GEN_RESET_BYTES "C7 81 04 B0 19 00 00 00 00 00"
+typedef void (*ResetFn)(void* gen);
+static ResetFn g_resetOriginal;
+static volatile LONG g_resets;
+
+static void ResetDetour(void* gen)
+{
+    uintptr_t ret = (uintptr_t)__builtin_return_address(0);
+    LONG n = InterlockedIncrement(&g_resets);
+    if (n <= 8 || n % 50 == 0)
+    {
+        uint32_t idx = 0;
+        int32_t op = -1;
+        Rd((uintptr_t)gen + 0x19B004, &idx, 4);
+        if (idx) Rd((uintptr_t)gen + (uintptr_t)(idx - 1) * 0x19B0u, &op, 4);
+        hf->log(g_mod, "generator reset #%ld from game.dll+%#llx (return address); pass index was %u, the pass before it op %02x; last dispatched op %02x",
+                n, (unsigned long long)(ret - g_game), idx, (unsigned)op & 0xFF, (unsigned)g_opRing[g_opPos % 256] & 0xFF);
+    }
+    g_resetOriginal(gen);
+}
+
+/* 0.8.9: the generator's restart request. game.dll+0xF285B0 (rcx the failing pass's entry: op at +0, its name at
+ * +0x1988; rdx the pass context, +0x18 the level) counts the restart at lg+0xF954, keeps the first failing pass at
+ * lg+0xF958 and sets the abort flag (+0x19B0EA), after which the whole level is generated again. Not called directly:
+ * through a pointer. The return address names the code that gave up. */
+#define RVA_GEN_RESTART 0xF285B0u
+#define GEN_RESTART_BYTES "4C 8B 42 18 41 FF 80 54 F9 00 00"
+typedef void (*RestartFn)(void* entry, void* ctx);
+static RestartFn g_restartOriginal;
+static volatile LONG g_restarts;
+
+static void RestartDetour(void* entry, void* ctx)
+{
+    uintptr_t ret = (uintptr_t)__builtin_return_address(0);
+    LONG n = InterlockedIncrement(&g_restarts);
+    if (n <= 12 || n % 50 == 0)
+    {
+        int32_t op = -1;
+        uint64_t nameRef = 0;
+        char name[64] = {0};
+        Rd((uintptr_t)entry, &op, 4);
+        Rd((uintptr_t)entry + 0x1988, &nameRef, 8);
+        if (nameRef > 0x10000 && nameRef < 0x7FFFFFFFFFFFull) { Rd((uintptr_t)nameRef, name, sizeof name - 1); }
+        for (int k = 0; k < 63 && name[k]; k++) if (name[k] < 32 || name[k] > 126) { name[k] = 0; break; }
+        hf->log(g_mod, "generator RESTART #%ld requested by op %02x (name ref %016llx '%s') from game.dll+%#llx; ops run this generation %ld",
+                n, (unsigned)op & 0xFF, (unsigned long long)nameRef, name, (unsigned long long)(ret - g_game), (long)g_opsThisGen);
+    }
+    g_restartOriginal(entry, ctx);
+}
+
+/* 1.0.0: the D9 crash. The objective setup walks the level tree (game.dll 0x5D2BB0: EngineApi +0x50 domain, +0x48/+0x50
+ * sub-levels, +0x58/+0x60 units) and passes each unit to 0x5D2CE0, which hands it to the engine; at D9 one of the Dark
+ * Fluid site's units is NULL (removed at that difficulty while still counted) and helldivers2.exe+0x32F6CE reads it.
+ * The detour skips a NULL unit and counts it. */
+#define RVA_OBJ_UNIT 0x5D2CE0u
+#define OBJ_UNIT_BYTES "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 48 89 7C 24 20 41 54 41 56"
+typedef void (*ObjUnitFn)(void* a, uint32_t b, void* unit, void* d, uint32_t e);
+static ObjUnitFn g_objUnitOriginal;
+static volatile LONG g_nullUnits;
+
+static int g_resOffset; /* defined with the WorldSpawnUnit hook below */
+static uint64_t g_unitRing[8];
+static volatile LONG g_unitRingPos;
+
+/* 1.0.1: the crash is inside the engine on a unit that is not NULL but whose data is (helldivers2.exe+0x32F6CE reads
+ * a NULL pointer it got for that unit). The last units the walk handed over are kept, and an exception handler names
+ * them when that access violation happens; the game then crashes as before. */
+static LONG WINAPI CrashNamer(EXCEPTION_POINTERS* ep)
+{
+    static volatile LONG once;
+    HMODULE exe = GetModuleHandleA(NULL);
+    uintptr_t rip = (uintptr_t)ep->ExceptionRecord->ExceptionAddress;
+    if (ep->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && rip == (uintptr_t)exe + 0x32F6CEu && InterlockedExchange(&once, 1) == 0)
+    {
+        LONG at = g_unitRingPos;
+        for (int k = 0; k < 8; k++)
+        {
+            uint64_t r = g_unitRing[(at - k + 8 * 1024) % 8];
+            hf->log(g_mod, "CRASH at helldivers2.exe+0x32F6CE: unit %d back in the objective walk: resource %016llx", k, (unsigned long long)r);
+        }
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+static void ObjUnitDetour(void* a, uint32_t b, void* unit, void* d, uint32_t e)
+{
+    if (unit)
+    {
+        uint64_t res = 0;
+        if (g_resOffset >= 0) Rd((uintptr_t)unit + (uintptr_t)g_resOffset, &res, 8);
+        LONG at = InterlockedIncrement(&g_unitRingPos);
+        g_unitRing[at % 8] = res ? res : (uint64_t)(uintptr_t)unit;
+    }
+    /* 1.0.2: the engine function the walk ends in (helldivers2.exe+0x32F6A0) first looks its second argument (this
+     * call's b) up with helldivers2.exe+0x9D8C0 and uses the result unchecked; at D9 that lookup is NULL. Ask the same
+     * lookup first and skip the unit when it has nothing. */
+    {
+        typedef void* (*LookupFn)(uint32_t id);
+        static LookupFn lookup;
+        if (!lookup) lookup = (LookupFn)((uintptr_t)GetModuleHandleA(NULL) + 0x9D8C0u);
+        if (unit && !lookup(b))
+        {
+            LONG n = InterlockedIncrement(&g_nullUnits);
+            if (n <= 20) hf->log(g_mod, "objective setup: id %#x has no object (the D9 crash): unit skipped (#%ld)", b, n);
+            return;
+        }
+    }
+    if (!unit)
+    {
+        LONG n = InterlockedIncrement(&g_nullUnits);
+        if (n <= 20) hf->log(g_mod, "objective setup: a NULL unit skipped (#%ld, index %u)", n, b);
+        return;
+    }
+    g_objUnitOriginal(a, b, unit, d, e);
+}
+
+static void HookRestart(void)
+{
+    if (hf->code_matches(g_game + RVA_OBJ_UNIT, OBJ_UNIT_BYTES) &&
+        hf->hook(g_mod, g_game + RVA_OBJ_UNIT, (void*)ObjUnitDetour, (void**)&g_objUnitOriginal) == 0)
+    {
+        hf->log(g_mod, "hooked the objective unit walk (NULL-unit guard)");
+        AddVectoredExceptionHandler(1, CrashNamer);
+    }
+    else { g_objUnitOriginal = NULL; hf->log(g_mod, "objective unit walk: not hooked"); }
+    if (hf->code_matches(g_game + RVA_GEN_RESTART, GEN_RESTART_BYTES) &&
+        hf->hook(g_mod, g_game + RVA_GEN_RESTART, (void*)RestartDetour, (void**)&g_restartOriginal) == 0)
+        hf->log(g_mod, "hooked the generator restart request (diagnostics)");
+    else { g_restartOriginal = NULL; hf->log(g_mod, "generator restart request: not hooked"); }
+}
+
+static void HookDispatch(void)
+{
+    HookRestart();
+    if (hf->code_matches(g_game + RVA_GEN_RESET, GEN_RESET_BYTES) &&
+        hf->hook(g_mod, g_game + RVA_GEN_RESET, (void*)ResetDetour, (void**)&g_resetOriginal) == 0)
+        hf->log(g_mod, "hooked the generator reset (diagnostics)");
+    else { g_resetOriginal = NULL; hf->log(g_mod, "generator reset: not hooked"); }
+    if (hf->code_matches(g_game + RVA_PASS_DISPATCH, PASS_DISPATCH_BYTES) &&
+        hf->hook(g_mod, g_game + RVA_PASS_DISPATCH, (void*)DispatchDetour, (void**)&g_dispOriginal) == 0)
+        hf->log(g_mod, "hooked the generator pass dispatcher (diagnostics)");
+    else { g_dispOriginal = NULL; hf->log(g_mod, "pass dispatcher: not hooked"); }
+}
+
+static void SetDrill(int on);
+
 static void GenStampListDetour(void* rcx, void* rdx, void* pass)
 {
     InsertObjectiveEntries((uintptr_t)pass);
+    LogRestart(g_genCalls);
     g_genOriginal(rcx, rdx, pass);
+    {
+        uint64_t sl = 0;
+        uint32_t n = 0;
+        int df = 0;
+        if (Rd((uintptr_t)rcx + 0x20, &sl, 8) && sl && Rd((uintptr_t)sl + 0xD4, &n, 4) && n <= 30)
+            for (uint32_t i = 0; i < n; i++)
+            {
+                uint32_t id = 0;
+                if (Rd((uintptr_t)sl + 4 + 4 * i, &id, 4) && id == OBJ_DEPLOY) df = 1;
+            }
+        SetDrill(df);
+    }
     LogStampChoice((uintptr_t)rcx, (uintptr_t)pass, g_genCalls);
 }
 
@@ -1063,6 +1310,9 @@ static void GenStampListDetour(void* rcx, void* rdx, void* pass)
 #define GEN_OBJECTIVES_BYTES "48 89 5C 24 20 55 56 57 41 54 41 55 41 56 41 57"
 #define RVA_SPREAD 0xF7C310u
 #define SPREAD_BYTES "48 8B C4 4C 89 40 18 48 89 50 10 48 89 48 08 55"
+#define SPREAD_GENERATOR_OFFSET 0x58u
+#define GENERATOR_PLACEMENT_FAILED 0x19B0EAu
+#define STAMP_CLEARANCE_OFFSET 0x148u
 typedef void (*PassFn)(void* rcx, void* rdx, void* pass);
 static PassFn g_objOriginal, g_spreadOriginal;
 static volatile LONG g_objCalls, g_spreadCalls;
@@ -1100,8 +1350,43 @@ static void ObjectivesDetour(void* rcx, void* rdx, void* pass)
 static void SpreadDetour(void* rcx, void* rdx, void* pass)
 {
     LONG c = InterlockedIncrement(&g_spreadCalls);
+    int sample = c <= 40 || c % 25 == 0;
+    uint64_t generator = 0;
+    uint8_t failedBefore = 0, failedAfter = 0;
+    /* SpreadLocations sets this flag at 0xF7CC12 when its location candidates are exhausted.
+     * That branch skips the normal counter writebacks, so their values cannot report failure. */
+    int haveFailureFlag = sample && pass && Rd((uintptr_t)pass + SPREAD_GENERATOR_OFFSET, &generator, 8) && generator &&
+                          Rd((uintptr_t)generator + GENERATOR_PLACEMENT_FAILED, &failedBefore, 1);
     g_spreadOriginal(rcx, rdx, pass);
-    if (c <= 24) hf->log(g_mod, "spread pass %ld done (gen %ld, objectives pass %ld)", c, g_genCalls, g_objCalls);
+    if (!sample) return;
+    if (haveFailureFlag && Rd((uintptr_t)generator + GENERATOR_PLACEMENT_FAILED, &failedAfter, 1))
+    {
+        uint64_t level = 0;
+        uint8_t difficulty = 0;
+        if (Rd((uintptr_t)pass + 0x18, &level, 8) && level) Rd((uintptr_t)level + 0xF9, &difficulty, 1);
+        hf->log(g_mod, "spread pass %ld (gen %ld): level %#llx difficulty %u, placement failed %u -> %u",
+                c, g_genCalls, (unsigned long long)level, (unsigned)difficulty, (unsigned)failedBefore, (unsigned)failedAfter);
+    }
+    /* 0.8.5: what SpreadLocations writes back at its end (0xF7D480..0xF7D4BE): through the pointers at rcx +0xD8,
+     * +0xE8, +0xF8, +0x108, +0x118, five u32 (r14d, 0, [rsp+0x60], [rbp-0x74], [rsp+0x64]); and the level and kind
+     * counters it reads at the start (+0x40, +0x50, +0x60 pointers, +0x68). Logged for the first 40 passes, then
+     * every 25th, to see what differs between a spread that keeps the level and one that has it generated again. */
+    {
+        uint32_t v[9] = {0};
+        static const uint32_t offs[5] = {0xD8, 0xE8, 0xF8, 0x108, 0x118};
+        for (int i = 0; i < 5; i++)
+        {
+            uint64_t ptr = 0;
+            if (Rd((uintptr_t)rcx + offs[i], &ptr, 8) && ptr) Rd((uintptr_t)ptr, &v[i], 4);
+        }
+        uint64_t p40 = 0, p50 = 0, p60 = 0;
+        if (Rd((uintptr_t)rcx + 0x40, &p40, 8) && p40) Rd((uintptr_t)p40, &v[5], 4);
+        if (Rd((uintptr_t)rcx + 0x50, &p50, 8) && p50) Rd((uintptr_t)p50, &v[6], 4);
+        if (Rd((uintptr_t)rcx + 0x60, &p60, 8) && p60) Rd((uintptr_t)p60, &v[7], 4);
+        Rd((uintptr_t)rcx + 0x68, &v[8], 4);
+        hf->log(g_mod, "spread pass %ld (gen %ld, objectives pass %ld): out d8=%u e8=%u f8=%u 108=%u 118=%u | in 40=%u 50=%u 60=%u 68=%u", c,
+                g_genCalls, g_objCalls, v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8]);
+    }
 }
 
 /* ---- 0.5.6: the entity queue (game.dll 0xFDA650) ----
@@ -1283,6 +1568,7 @@ static void HookDiagnostics(void)
         hf->log(g_mod, "hooked SpreadLocations (diagnostics)");
     else { g_spreadOriginal = NULL; hf->log(g_mod, "SpreadLocations: not hooked"); }
     GuardEntityString();
+    HookDispatch();
     if (hf_hook_WorldSpawnUnit(g_mod, SpawnUnitDetour, &g_spawnOriginal, 0) == 0) hf->log(g_mod, "hooked WorldSpawnUnit (unit names for the guard)");
     if (hf_hook_SpawnEntity(g_mod, SpawnEntityDetour, &g_spawnEntOriginal, 0) == 0) hf->log(g_mod, "hooked SpawnEntity (Dark Fluid entities)");
     else g_spawnEntOriginal = NULL;
@@ -1316,7 +1602,7 @@ static void HookGenerator(void)
  * the ICBM's record: its two small circles (the Dark Fluid sites stood on unflattened ground) and its proxies (the
  * invisible walls). Each port gets its own record: the 2024 circles (stamps-20240601.json), every other array empty.
  * The circle layout is read from the ICBM's record, whose two circles are known (generated_stamp_settings). */
-#define SHAPE_HEADER 0x80u
+#define SHAPE_HEADER 0xD8u /* 0.8.3: the whole record (the file's 0xE0 entry less its key); 0x80 left +0x80..+0xD7 to the circles */
 
 static int FindFloat(const uint8_t* b, size_t n, float v, size_t from)
 {
@@ -1377,6 +1663,13 @@ static uint64_t MakeShape(const uint8_t* tplItem, uint64_t key, size_t p)
             o += 8;
         }
     }
+    /* 0.8.3: the rest as the 2024 record of these stamps (generated_stamp_settings.dl_bin of 2024-06-01, decrypted):
+     * +0x60 stays 1; the sub-level list (+0x68 level hash, +0x70 pointer, +0x78 count) empty, where the ICBM's held its
+     * own level b96fe7bf... once, so every Dark Fluid site also placed an ICBM level whose packages this mission never
+     * loads (the purple ground); the five lists at +0x80..+0xCF empty; +0xD0 0. 186 current stamps have exactly this. */
+    memset(h + 0x68, 0, 0x18);
+    memset(h + 0x80, 0, 0x50);
+    memset(h + 0xD0, 0, 8);
     char hx[SHAPE_HEADER * 2 + 1] = {0};
     for (size_t k = 0; k < SHAPE_HEADER; k++) sprintf(hx + 2 * k, "%02x", head[k]);
     hf->log(g_mod, "shape: %s: %zu circles (stride %zu, x %d y %d r %d), cleared%s; template header %s", kPorted[p].name, count, stride, x0, y0,
@@ -1405,6 +1698,14 @@ static void PlaceItems(uintptr_t pass, uint64_t templateKey)
          * hash_lookup has none), so the 2024 game never placed them; placed, they showed the missing-unit "?" on flat
          * ground and spawned no objective. */
         if (strstr(kPorted[p].name, "records only")) { done++; continue; }
+        /* 0.9.5: no item for the backpack site: it holds one deploy and only two payload slots, and the mission now
+         * places a single site (Deploy Dark Fluid's), which must be DF1 or DF2 (three payload slots). The vessel comes
+         * by its stratagem. */
+        if (key == 0x2DDAA26E56F2CD4Cull) { done++; continue; }
+        /* 0.9.8 test: DF1 alone. 0.9.7 entered D1 but crashed at D9 while setting up the third objective entity
+         * (game.dll 0x5D22DF passes a null object to the engine, helldivers2.exe+0x32F6CE); DF1 and DF2 are drawn at
+         * random, so this tells whether DF2's site is the broken one. */
+        if (key == 0xB10C9886D3006FD4ull) { done++; continue; }
         if (FindItem(key, NULL)) { done++; continue; }
         uint8_t item[LOCATION_ITEM];
         /* 0.5.5 test: the template's own radius (+0xD8..+0xE4 kept) instead of the stamps' 2024 outer radii (143-187 m),
@@ -1422,17 +1723,31 @@ static void PlaceItems(uintptr_t pass, uint64_t templateKey)
         memcpy(item + 0x60, &levels, 4);
         /* 0.8.2: the stamp's own 2024 registration (generated_location_groups.dl_bin of 2024-06-01, decrypted by 0.8.0),
          * which put all five in the ICBM's group. Its fields, carried to this build's layout by the 341 stamps both
-         * files have (memory = this build's file + 8): +0x110 4 (ICBM 6), +0x138 18, +0x148 200 m (TCS 24 m),
+         * files have (memory = this build's file + 8): +0x110 4 (ICBM 6), +0x138 18,
          * +0x15C 0x060000FF for the two drop sites (0x050000FF backpack site, TCS), +0x160 the 2024 0x74 / 0x7C in
          * this build's bits, 0x434 / 0x43C (ICBM 0x430), and the second list (+0x100) empty except at the backpack
          * site. */
         {
             int pack = key == 0x2DDAA26E56F2CD4Cull, tcs = strstr(kPorted[p].name, "TCS") != NULL;
-            uint32_t category = 4, c138 = 18, w15c = (pack || tcs) ? 0x050000FFu : 0x060000FFu, w160 = pack ? 0x43Cu : 0x434u;
-            float spacing = tcs ? 24.0f : 200.0f;
+            uint32_t category = 4, c138 = 18, w15c = (pack || tcs) ? 0x050000FFu : 0x060000FFu /* 2024 / 1.001.104 (0.9.2: back from the 0.9.1 test) */, w160 = pack ? 0x43Cu : 0x434u;
             memcpy(item + 0x110, &category, 4);
+            /* 0.9.3: LocationStampInfo (filediver's typelib): +0x134 and +0x138 are SubRegionType. 2024 / 1.001.104
+             * have +0x138 = 18, SubRegionType_Bugs: the site must stand in a Bugs subregion. Meridia (region_primordial_bug)
+             * is that nearly everywhere; on the standard map those subregions are few and the nests take them at high
+             * difficulty. Test: no subregion requirement (the ICBM's 0). */
+            c138 = 0;
             memcpy(item + 0x138, &c138, 4);
-            memcpy(item + 0x148, &spacing, 4);
+            /* The 2024 Dark Fluid items add 200 m in the subregion clearance check (0xF2BB9B / 0xF2BBF1).
+             * They now run on the current Terminid standard map. Keep that map's ICBM clearance on the three
+             * imported Dark Fluid items, while keeping their collision circles and the TCS registrations. */
+            {
+                /* 0.9.2: the 2024 / 1.001.104 clearance again, 200 m for the Dark Fluid sites and 24 m for TCS; the
+                 * mission is back on its own small map (the template's 0 was for the standard map) */
+                float clearance = tcs ? 24.0f : 0.0f; /* 0.9.6: 0 for the Dark Fluid sites again. The 2024 200 m is added to the
+                 * subregion size in the spacing check (0xF2BA70); on the standard map even the extraction (the only other
+                 * location, 0.9.5) never stands that far, so no level kept (0.9.2-0.9.5); 0.8.9 with 0 entered. */
+                memcpy(item + STAMP_CLEARANCE_OFFSET, &clearance, 4);
+            }
             memcpy(item + 0x15C, &w15c, 4);
             memcpy(item + 0x160, &w160, 4);
             if (!pack) memset(item + 0x100, 0, 16);
@@ -1452,7 +1767,10 @@ static void PlaceItems(uintptr_t pass, uint64_t templateKey)
         group->list = list;
         group->n = count;
         done++;
-        hf->log(g_mod, "items: %s placed in group %08x (radius %.1f)", kPorted[p].name, group->id, (double)radius);
+        float clearance = 0.0f;
+        memcpy(&clearance, item + STAMP_CLEARANCE_OFFSET, 4);
+        hf->log(g_mod, "items: %s placed in group %08x (radius %.1f, subregion clearance %.1f)",
+                kPorted[p].name, group->id, (double)radius, (double)clearance);
     }
     g_itemsPlaced = done == PORTED_COUNT ? 1 : -1;
 }
@@ -1471,24 +1789,52 @@ static void PlaceItems(uintptr_t pass, uint64_t templateKey)
 #define MISSION_KIND_DF 1u
 static int g_drillGranted;
 
-static int AddToSet(uintptr_t table, const char* what)
+/* 0.8.4: the drill only in Dark Fluid missions. Set 1 is every standard mission's (kinds 1 and 3), so the TCS03 Thumper
+ * is put in or taken out of it on every level generation (GenStampListDetour), by whether the mission has the Deploy
+ * Dark Fluid objective; the players' mission loadouts are built from the set after the level is generated. */
+static uintptr_t g_grantTables[4];
+static int g_grantTableCount, g_drillOn = -1;
+
+static int SetDrillInSet(uintptr_t table, int on)
 {
     uint32_t set[6];
     uintptr_t at = table + MISSION_KIND_DF * sizeof set;
     if (!Rd(at, set, sizeof set)) return 0;
+    int have = -1, empty = -1;
     for (int k = 0; k < 6; k++)
     {
-        if (set[k] == STRATAGEM_TCS03_THUMPER) return 1;
-        if (set[k] == 0)
-        {
-            uint32_t v = STRATAGEM_TCS03_THUMPER;
-            int ok = hf->write(at + 4u * (uintptr_t)k, &v, 4) == 0;
-            hf->log(g_mod, "drill: %s: set %u (kinds 1 and 3) grants the TCS03 Thumper (place %d)%s", what, MISSION_KIND_DF, k, ok ? "" : ": write refused");
-            return ok;
-        }
+        if (set[k] == STRATAGEM_TCS03_THUMPER && have < 0) have = k;
+        if (set[k] == 0 && empty < 0) empty = k;
     }
-    hf->log(g_mod, "drill: %s: the kind-3 set is full", what);
-    return 0;
+    if (on && have < 0 && empty >= 0)
+    {
+        uint32_t v = STRATAGEM_TCS03_THUMPER;
+        return hf->write(at + 4u * (uintptr_t)empty, &v, 4) == 0;
+    }
+    if (!on && have >= 0)
+    {
+        /* the reader stops at the first 0 (0x6AE370): move the later types up, then clear the last */
+        for (int k = have; k < 5; k++) set[k] = set[k + 1];
+        set[5] = 0;
+        return hf->write(at, set, sizeof set) == 0;
+    }
+    return 1;
+}
+
+static void SetDrill(int on)
+{
+    if (on == g_drillOn || !g_grantTableCount) return;
+    int ok = 1;
+    for (int i = 0; i < g_grantTableCount; i++) ok &= SetDrillInSet(g_grantTables[i], on);
+    g_drillOn = on;
+    hf->log(g_mod, "drill: %s set 1 of %d table(s)%s", on ? "Dark Fluid mission: TCS03 Thumper put in" : "other mission: TCS03 Thumper taken out of",
+            g_grantTableCount, ok ? "" : " (a write was refused)");
+}
+
+static void AddTable(uintptr_t table, const char* what)
+{
+    if (g_grantTableCount < 4) g_grantTables[g_grantTableCount++] = table;
+    hf->log(g_mod, "drill: mission stratagem table: %s", what);
 }
 
 static void GrantDrill(void)
@@ -1501,7 +1847,7 @@ static void GrantDrill(void)
         hf->log(g_mod, "drill: the mission stratagem table is not the reviewed one: not granted");
         return;
     }
-    AddToSet(g_game + RVA_MISSION_GRANTS, "the game's table");
+    AddTable(g_game + RVA_MISSION_GRANTS, "the game's table");
     /* HellForge's level-11 copy: committed memory within 2 GB of game.dll holding the same table with one more type */
     uintptr_t lo = g_game > 0x80000000ull ? g_game - 0x80000000ull : 0x10000, hi = g_game + 0x80000000ull, at = lo;
     MEMORY_BASIC_INFORMATION mi;
@@ -1520,7 +1866,7 @@ static void GrantDrill(void)
                     if (memcmp(t, base, sizeof base) == 0) continue;
                     char what[64];
                     snprintf(what, sizeof what, "HellForge's level-11 copy at %p", (void*)(b + o));
-                    AddToSet(b + o, what);
+                    AddTable(b + o, what);
                 }
         }
         at = e;
@@ -1537,7 +1883,28 @@ static void LogObjectiveInstances(void)
     HfObjectiveManager* m = hf_global_ObjectiveManager(g_mod);
     uint32_t n = 0;
     uint64_t arr = 0;
-    if (!m || !Rd((uintptr_t)m + 0x24, &n, 4) || n == g_objSeen) return;
+    if (!m || !Rd((uintptr_t)m + 0x24, &n, 4)) return;
+    /* 1.0.0: also log when an instance's record changes (its state), not only the count */
+    if (n == g_objSeen)
+    {
+        static uint8_t last[16][0x18];
+        uint64_t arr2 = 0;
+        if (n == 0 || n > 16 || !Rd((uintptr_t)m + 0x50, &arr2, 8) || !arr2) return;
+        for (uint32_t i = 0; i < n; i++)
+        {
+            uint64_t inst = 0;
+            uint8_t now[0x18];
+            if (!Rd((uintptr_t)arr2 + 8u * i, &inst, 8) || !inst || !Rd((uintptr_t)inst, now, sizeof now)) continue;
+            if (memcmp(now, last[i], sizeof now))
+            {
+                char hx[0x18 * 2 + 1] = {0};
+                for (int k = 0; k < 0x18; k++) sprintf(hx + 2 * k, "%02x", now[k]);
+                hf->log(g_mod, "    objective %u changed: %s", i, hx);
+                memcpy(last[i], now, sizeof now);
+            }
+        }
+        return;
+    }
     g_objSeen = n;
     if (n > 64 || !Rd((uintptr_t)m + 0x50, &arr, 8) || !arr) { hf->log(g_mod, "objectives: %u instance(s)", n); return; }
     hf->log(g_mod, "objectives: %u instance(s)", n);
@@ -1628,8 +1995,9 @@ static void LogLoadouts(void)
  * key is not reachable; instead the reader is asked for a current file of the same name while CreateFileW/A (in
  * KernelBase) open the 2024 file in its place. Each result is written to OLD_DIR\dec\<name> with a check that it
  * starts like a decrypted dl_bin ({u32 count, "LDLD"}). One current file is decrypted plainly as the control. */
-#define OLD_DIR "F:/Game/A/HD2/A/0/hd2_old/20240601/data/game/"
-#define DEC_DIR "F:/Game/A/HD2/A/0/hd2_old/20240601/dec/"
+/* 0.9.0: 1.001.104 (2024-10-15, the last build with the Meridia missions); 2024-06-01 is done (20240601/dec) */
+#define OLD_DIR "F:/Game/A/HD2/A/0/hd2_old/1001104/data/game/"
+#define DEC_DIR "F:/Game/A/HD2/A/0/hd2_old/1001104/dec/"
 typedef void* (*ReadFn)(const char* name, uint32_t* size);
 typedef void (*FreeFn)(void* buffer);
 typedef HANDLE (WINAPI *CreateFileWFn)(LPCWSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
@@ -1763,8 +2131,8 @@ static void DecryptOldSettings(void)
     }
     hf->log(g_mod, "decrypt: %d of %d 2024 files decrypted into " DEC_DIR, ok, ok + bad);
     /* 0.8.1: the current build's files too, for a file-to-file comparison (DEC_DIR/current/) */
-    CreateDirectoryA(DEC_DIR "current", NULL);
-    h = FindFirstFileA("F:/Game/A/HD2/HellForgev5/game/data/game/*.dl_bin", &fd);
+    /* 0.9.0: the current files are already in 20240601/dec/current */
+    h = INVALID_HANDLE_VALUE;
     ok = 0;
     if (h != INVALID_HANDLE_VALUE)
     {
@@ -1786,6 +2154,34 @@ static void DecryptOldSettings(void)
     hf->log(g_mod, "decrypt: %d current files written into " DEC_DIR "current/", ok);
 }
 
+/* ---- 1.0.3: the payload sites active from the start ----
+ * Payload Site (entity 0f19b7b633e9aa3c) has start_inactive = 1 and hide_from_ui_if_inactive = 1 in its
+ * ObjectiveComponent (0xAD0 per record; filediver's typelib with shalzuth's field order: +0xA84 sequential, +0xA85
+ * start_inactive, +0xA86 hide_from_ui_if_inactive, +0xA88 base_counts_per_difficulty[10]). Nothing in this port has
+ * activated them (they spawn, stay inactive and hidden, grant no drill), so they start active. Checked before writing:
+ * both bytes must read 1. */
+#define ENT_PAYLOAD 0x0F19B7B633E9AA3Cull
+#define ENT_DEPLOY 0xBA58A7667AA11627ull
+static int g_payloadActivated;
+
+static void ActivatePayloadSites(void)
+{
+    if (g_payloadActivated || !hf->component_record) return;
+    uint32_t stride = 0;
+    uintptr_t rec = hf->component_record("ObjectiveComponentData", ENT_PAYLOAD, &stride);
+    if (!rec) return; /* entity data not loaded yet */
+    g_payloadActivated = 1;
+    uint8_t p[3] = {0}, d[3] = {0};
+    uintptr_t drec = hf->component_record("ObjectiveComponentData", ENT_DEPLOY, NULL);
+    Rd(rec + 0xA84, p, 3);
+    if (drec) Rd(drec + 0xA84, d, 3);
+    hf->log(g_mod, "payload objective record %p (stride %#x): sequential %u start_inactive %u hide_if_inactive %u; deploy: %u %u %u",
+            (void*)rec, stride, p[0], p[1], p[2], d[0], d[1], d[2]);
+    if (stride != 0xAD0 || p[1] != 1 || p[2] != 1) { hf->log(g_mod, "payload objective: layout not the reviewed one, left as it is"); return; }
+    uint8_t zero[2] = {0, 0};
+    hf->log(g_mod, "payload objective: start active and shown%s", hf->write(rec + 0xA85, zero, 2) == 0 ? "" : " (write refused)");
+}
+
 static void Tick(HfMod* mod, float dt, void* user)
 {
     (void)mod; (void)user;
@@ -1799,8 +2195,9 @@ static void Tick(HfMod* mod, float dt, void* user)
     LogDrillAvailable();
     LogGrantDetour();
     LogLoadouts();
-    (void)DecryptOldSettings; /* 0.8.2: off; the 2024 and current files are already in hd2_old/20240601/dec */
-    GrantDrill(); /* 0.7.3: on again; LogLoadouts shows whether the drill reaches the players' mission loadouts */
+    ActivatePayloadSites();
+    (void)DecryptOldSettings; /* 0.9.1: off; 1.001.104 is in hd2_old/1001104/dec */
+    GrantDrill(); /* 0.8.4: finds the tables only; SetDrill puts the drill in for Dark Fluid missions alone */
     /* The stamps' packages, held for the session. hf->load_package only takes catalogued packages or a data spec's
      * own, and these come from the zz.darkfluid-resources patch, so the game's own RequestPackages is called (on this,
      * the game thread, as HellForge's load_package does) with the RefcountedPackageSystem; PackageHasLoaded says when
@@ -1853,7 +2250,8 @@ HF_MOD_EXPORT int hellforge_mod_init(const HfApi* api, HfMod* mod)
     hf = api; g_mod = mod;
     if (hf->version < 16) return 1;
     if (strcmp(hf->build_id(), BUILD) != 0) { hf->log(mod, "game build %s is not " BUILD ": nothing is done", hf->build_id()); return 0; }
-    hf->log(mod, "0.8.2: places the Dark Fluid stamps' location items, loads their packages and hooks GenerateMissionStampList to "
+    hf->log(mod, "1.0.3 (payload sites start active; skips the D9 crash's unit; payload sites as 3 steps from the site's own slots; DF1 only; own small kind-3 map, the site's own landing zone; one Dark Fluid site, clearance 0; payload slot 0..0, no backpack-site item; standard map, no Bugs-subregion requirement): uses the Terminid standard map's subregion clearance for Dark Fluid stamps; places their location items, "
+                 "loads their packages and hooks GenerateMissionStampList to "
                  "give them their objective types; then makes Deploy Dark Fluid template 6's special mission");
     hf->on(mod, HF_EVENT_ENTITIES_READY, Ready, NULL);
     if (!hf->on_game_thread(mod, Tick, NULL)) hf->log(mod, "no game-thread callback: nothing is done");
